@@ -666,6 +666,36 @@ static void log_git_commit_index_runtime(void) {
 /* sleep time for spectrum polling and related retries (microseconds) */
 useconds_t spectrum_poll_us = 100000; // default 100 ms
 
+/* Some radiod backends don't implement SPECT2_DEMOD at all (e.g. forks
+ * predating its addition upstream) - a request for it isn't recognized as
+ * a spectrum demod, so radiod silently loads a plain audio preset instead
+ * and no BIN_DATA/BIN_BYTE_DATA is ever produced. There's no capability
+ * flag in the status protocol to ask for this up front, so it's detected
+ * per-process (one radiod backend per ka9q-web instance) by probing: try
+ * SPECT2_DEMOD first, and if no spectrum TLV arrives after a handful of
+ * requests, fall back to the older SPECT_DEMOD for the rest of this
+ * process's life. Counted cumulatively across spectrum_thread's whole
+ * process lifetime (not a single-invocation timer) - a browser reload
+ * tears down and restarts spectrum_thread well under any reasonable
+ * per-invocation timeout, so a per-invocation clock would never
+ * accumulate enough evidence; a running total does. */
+static volatile int Spect2_supported = -1; /* -1 = unknown, 0 = no, 1 = yes */
+static volatile int Spect2_probe_attempts = 0; /* cumulative failed SPECT2_DEMOD polls */
+static pthread_mutex_t spect2_probe_mutex = PTHREAD_MUTEX_INITIALIZER;
+#define SPECT2_PROBE_MAX_ATTEMPTS 10
+/* sp->last_spectrum_recv_ms (existing field) is stamped unconditionally by
+ * process_spectrum_packet() for ANY response on the spectrum SSRC, real
+ * bin data or not - it's the wrong signal for "did SPECT2_DEMOD actually
+ * work", since a rejected/misinterpreted demod request still gets SOME
+ * response. This counter increments only inside extract_powers()'s own
+ * BIN_DATA/BIN_BYTE_DATA success paths (the only places real spectrum
+ * bins were actually decoded), so it's safe to use as that signal. */
+static volatile unsigned long Real_spectrum_packets = 0;
+
+static int preferred_spectrum_demod(void) {
+  return (Spect2_supported == 0) ? SPECT_DEMOD : SPECT2_DEMOD;
+}
+
 #define MAX_BINS 1620
 
 onion_connection_status websocket_cb(void *data, onion_websocket * ws,
@@ -1921,18 +1951,30 @@ onion_connection_status home(void *data, onion_request * req,
 
   sp->frequency=10000000;
   int level = 0;
-#if 0
-  sp->center_frequency = round(Frontend.samprate/4.0);
-  const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
-
-
-  for(; level < table_size; level++)
-    if(zoom_table[level].bin_width * zoom_table[level].bin_count <= round(Frontend.samprate/2.0))
-      break;
+  if (Frontend.samprate > 0) {
+    /* Center the default view on the real front end's usable band, and
+       pick the widest zoom level that still fits its Nyquist bandwidth -
+       previously disabled (#if 0) in favor of a fixed level=6 (~3.24 MHz
+       span) regardless of the actual front end, which is far too narrow
+       for HF's ~30 MHz of real bandwidth (64.8 Msps direct sampling). */
+    sp->center_frequency = round(Frontend.samprate/4.0);
+    const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
+    for(; level < table_size; level++)
+      if(zoom_table[level].bin_width * zoom_table[level].bin_count <= round(Frontend.samprate/2.0))
+        break;
+    if (level >= table_size)
+      level = table_size - 1; /* nothing fit (shouldn't happen) - narrowest, not out of bounds */
+  } else {
+    /* Frontend.samprate not yet populated - this is the very first
+       session since this process started, before any status packet has
+       arrived. Dividing/indexing against an unknown sample rate would
+       either divide by zero or walk off the end of zoom_table, so fall
+       back to the old fixed default (this is almost certainly why this
+       block was disabled in the first place) until real frontend data
+       exists. */
+    level = 6;
+  }
   sp->zoom_index = level;
-#else
-  level = 6;
-#endif
   sp->bins=zoom_table[level].bin_count;
   sp->bin_width=zoom_table[level].bin_width; // width of a pixel in hz
   sp->next=NULL;
@@ -2675,7 +2717,7 @@ void control_get_powers(struct session *sp, double frequency,int bins,double bin
       return;
     }
   }
-  control_get_powers_with_demod(sp,frequency,bins,bin_bw,SPECT2_DEMOD);
+  control_get_powers_with_demod(sp,frequency,bins,bin_bw,preferred_spectrum_demod());
 }
 
 void control_get_powers_with_demod(struct session *sp,double frequency,int bins,double bin_bw,int demod_type){
@@ -2940,6 +2982,7 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       /* record per-session spectrum receive time */
       if (sp)
         sp->last_spectrum_recv_ms = now_ms();
+      Real_spectrum_packets++;
       break;
     case BIN_DATA:
       l_count = optlen/sizeof(float);
@@ -2952,6 +2995,7 @@ int extract_powers(float *power,int npower,uint64_t *time,double *freq,double *b
       /* record per-session spectrum receive time */
       if (sp)
         sp->last_spectrum_recv_ms = now_ms();
+      Real_spectrum_packets++;
       break;
     case RESOLUTION_BW:
       *bin_bw = decode_float(cp,optlen);
@@ -3140,11 +3184,54 @@ returns `NULL` when the thread exits, as required by the POSIX thread API.
 */
 void *spectrum_thread(void *arg) {
   struct session *sp = (struct session *)arg;
+  /* Baseline against the process-wide Real_spectrum_packets counter, NOT
+     sp->last_spectrum_recv_ms - that field is stamped by
+     process_spectrum_packet() for ANY response on this SSRC, including
+     the plain-audio fallback radiod sends when it doesn't recognize
+     SPECT2_DEMOD, so it can't distinguish "got real bin data" from "got
+     some response". Real_spectrum_packets only moves on an actual
+     decoded BIN_DATA/BIN_BYTE_DATA TLV. */
+  unsigned long last_seen_real = Real_spectrum_packets;
   while(sp->spectrum_active) {
-    pthread_mutex_lock(&sp->spectrum_mutex);
-    control_get_powers_with_demod(sp,sp->center_frequency,sp->bins,sp->bin_width, SPECT2_DEMOD);
-    pthread_mutex_unlock(&sp->spectrum_mutex);
+    int const demod = preferred_spectrum_demod();
+    /* Poke, omnisdr-style (docs/INVENTORY.md's "orphan reaper" entry):
+       unconditionally re-assert the full channel spec every cycle rather
+       than trusting a keep-alive to survive between polls. If ubersdr's
+       orphan-channel reaper killed this channel since the last poll, this
+       recreates it from scratch - same self-healing shape as omnisdr's
+       own repollMs mechanism, which hits the identical reaper.
+       Never BLOCK waiting for spectrum_mutex: a session-cleanup path
+       elsewhere can hold it, and this loop must never get stuck behind
+       it - skip this cycle's poke rather than stall, and just try again
+       next cycle (spectrum_poll_us later). */
+    bool sent = false;
+    if (pthread_mutex_trylock(&sp->spectrum_mutex) == 0) {
+      control_get_powers_with_demod(sp,sp->center_frequency,sp->bins,sp->bin_width, demod);
+      pthread_mutex_unlock(&sp->spectrum_mutex);
+      sent = true;
+    }
     control_poll(sp);
+    if (Spect2_supported == -1) {
+      if (Real_spectrum_packets != last_seen_real) {
+        pthread_mutex_lock(&spect2_probe_mutex);
+        Spect2_supported = 1;
+        pthread_mutex_unlock(&spect2_probe_mutex);
+      } else if (sent && demod == SPECT2_DEMOD) {
+        pthread_mutex_lock(&spect2_probe_mutex);
+        if (Spect2_supported == -1) {
+          Spect2_probe_attempts++;
+          if (Spect2_probe_attempts >= SPECT2_PROBE_MAX_ATTEMPTS) {
+            Spect2_supported = 0;
+            fprintf(stderr, "spectrum_thread: no spectrum data received after %d SPECT2_DEMOD "
+                    "requests (cumulative across reconnects) - this radiod backend appears not to "
+                    "support it, falling back to SPECT_DEMOD for the rest of this process's life\n",
+                    Spect2_probe_attempts);
+          }
+        }
+        pthread_mutex_unlock(&spect2_probe_mutex);
+      }
+    }
+    last_seen_real = Real_spectrum_packets;
     if(usleep(sp->spectrum_poll_us) != 0) {
       perror("spectrum_thread: usleep(sp->spectrum_poll_us)");
     }
@@ -3886,7 +3973,28 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
     double session_freq = (double)sp->frequency;
     double diff = fabs(backend_freq - session_freq);
 
-    if (diff <= FREQ_EPS_HZ) {
+    if (backend_freq <= FREQ_EPS_HZ && session_freq > FREQ_EPS_HZ) {
+      /* A backend-reported frequency of ~0 Hz while we have a real nonzero
+         frequency requested is never legitimate "someone else retuned to
+         DC" state - 0 Hz is radiod's own disable convention, and this
+         station's radiod is fronted by ka9q_ubersdr's orphan-channel
+         reaper, which zeroes any channel it doesn't recognize roughly
+         every 60s (docs/INVENTORY.md; consumers/ka9q-web-hf/README.md).
+         Adopting it (the pre-existing "no recent client command" branch
+         below) was pushing BFREQ_FORCE:0.000 to the browser every time
+         the reaper fired. Never adopt this specific case, regardless of
+         the client-recent window - just reassert our own frequency. */
+      if (verbose && debug_send) {
+        unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+        fprintf(stderr, "%s: +%lums: SSRC %u: backend reports 0 Hz (disabled/reaped) while session wants "
+                "%.3f kHz - reasserting, never adopting 0\n",
+                __FUNCTION__, elapsed_ms, sp->ssrc, session_freq * 0.001);
+      }
+      char freq_msg[64];
+      snprintf(freq_msg, sizeof(freq_msg), "%.3f", session_freq * 0.001);
+      control_set_frequency(sp, freq_msg);
+      sp->freq_mismatch_count = 0;
+    } else if (diff <= FREQ_EPS_HZ) {
       /* Considered matched */
       if (sp->freq_mismatch_count != 0) {
         int prev_count = sp->freq_mismatch_count;

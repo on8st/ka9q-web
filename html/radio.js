@@ -507,7 +507,21 @@
       var target_center = centerHz;
       var target_preset = "am";
       var target_zoom_level = 14;
-      var switchModesByFrequency = false;
+      // True once this browser has ever explicitly saved a zoom level
+      // (localStorage key "zoom_level" exists) - see on_ws_open(), which
+      // uses this to avoid re-asserting a stale/default zoom on a brand
+      // new session and clobbering the server's own default (computed
+      // from the real front end's Nyquist bandwidth - the whole point of
+      // which is defeated if every connect immediately overrides it with
+      // whatever target_zoom_level happens to be).
+      var zoomLevelExplicitlySet = false;
+      // Default true: pick the right mode automatically per HF band on
+      // initial load / quick-band-select / deep-link (never on a manual
+      // frequency edit - see the `evt || userTypedFreq` guard around its
+      // call sites). Safe as a shared default across ka9q-web-vhf/uhf/hf:
+      // setModeBasedOnFrequencyIfAllowed() itself no-ops above 30 MHz, so
+      // VHF (144MHz)/UHF (430MHz) are never touched by this regardless.
+      var switchModesByFrequency = true;
       // If the user manually types or clicks Set, avoid automatic mode switching
       let userTypedFreq = false;
       let userTypedFreqTimer = null;
@@ -718,7 +732,17 @@ function applyQuickBW() {
           const freqEl = document.getElementById('freq');
           const zoomVal = (zoomEl && zoomEl.value) ? zoomEl.value : (target_zoom_level || 6);
           const freqVal = (freqEl && freqEl.value) ? parseFloat(freqEl.value) : (target_frequency/1000.0);
-          setTimeout(() => { try { sendControl('zoom','Z:' + String(zoomVal), undefined, true); } catch (e) {} }, 60);
+          // Only reassert a zoom level the user (or a deep-link) actually
+          // set explicitly. A brand new session has never touched the
+          // zoom control - forcing target_zoom_level's hardcoded default
+          // here would immediately overwrite the server's own default,
+          // which is computed per-instance from the real front end's
+          // Nyquist bandwidth (far wider on HF's 64.8 Msps direct
+          // sampling than the fixed default this UI was originally tuned
+          // for) and is exactly what should be left standing instead.
+          if (zoomLevelExplicitlySet) {
+            setTimeout(() => { try { sendControl('zoom','Z:' + String(zoomVal), undefined, true); } catch (e) {} }, 60);
+          }
           setTimeout(() => { try { if (!isNaN(freqVal)) sendControl('zoom_center','Z:c:' + (Number(freqVal)).toFixed(3), undefined, true); } catch (e) {} }, 120);
           setTimeout(() => { try { if (!isNaN(freqVal)) sendControl('freq','F:' + (Number(freqVal) / 1.0).toFixed(3), undefined, true); } catch (e) {} }, 180);
         } catch (e) {}
@@ -2867,20 +2891,46 @@ function applyQuickBW() {
         // Set mode based on frequency
         //console.log("setModeBasedOnFrequencyIfAllowed() called with freq=",f," switchModesByFrequency=",switchModesByFrequency);
         if(switchModesByFrequency ) {
+          // HF only - never touch VHF (2m)/UHF (70cm) tuning. ka9q-web-vhf
+          // and ka9q-web-uhf share this same image/JS, and 144/430 MHz are
+          // FM by convention, not something a below/above-10MHz-line rule
+          // (or any of the HF band table below) should ever override.
+          // 30 MHz is the conventional upper edge of HF.
+          if (f >= 30000000) {
+            return;
+          }
           if (f == 2500000 || f == 5000000 || f == 10000000 || f == 15000000 || f == 20000000 ||f == 25000000) {
-              setMode('am');
+              setMode('am'); // WWV/WWVH standard time/frequency stations
           } else if (f == 3330000 || f == 7850000) {
-              setMode('usb');
+              setMode('usb'); // CHU standard time/frequency station
           } else if (f >= 5330500 && f < 5406500) {
-                    setMode('usb');
+                    setMode('usb'); // 60m
           } else if (f >= 26960000 && f < 27360000){
-                    setMode('am');
+                    setMode('am'); // Citizens Band
           } else if (f >= 27360000 && f < 27410000){
-              setMode('lsb');
+              setMode('lsb'); // CB extension/freeband, LSB convention
+          } else if (f >= 1810000 && f < 2000000) {
+              setMode('lsb'); // 160m
+          } else if (f >= 3500000 && f < 3800000) {
+              setMode('lsb'); // 80m
+          } else if (f >= 7000000 && f < 7200000) {
+              setMode('lsb'); // 40m
+          } else if (f >= 10100000 && f < 10150000) {
+              setMode('cwu'); // 30m - CW/digital only, no phone allocation
+          } else if (f >= 14000000 && f < 14350000) {
+              setMode('usb'); // 20m
+          } else if (f >= 18068000 && f < 18168000) {
+              setMode('usb'); // 17m
+          } else if (f >= 21000000 && f < 21450000) {
+              setMode('usb'); // 15m
+          } else if (f >= 24890000 && f < 24990000) {
+              setMode('usb'); // 12m
+          } else if (f >= 28000000 && f < 29700000) {
+              setMode('usb'); // 10m
           } else if (f < 10000000) {
-              setMode('lsb');
+              setMode('lsb'); // below the 10 MHz line, not explicitly listed above
           } else {
-              setMode('usb');
+              setMode('usb'); // at/above the 10 MHz line, not explicitly listed above
           }
       }
     }
@@ -4064,7 +4114,15 @@ function setDefaultSettings(writeToStorage = true) {
   // contains the full set that `saveSettings()` expects.
   if (writeToStorage) {
     try { localStorage.setItem("tune_hz", spectrum.frequency.toString()); } catch (e) {}
-    try { localStorage.setItem("zoom_level", document.getElementById("zoom_level").value.toString()); } catch (e) {}
+    // Deliberately NOT persisting "zoom_level" here: this runs on a brand
+    // new session's very first bootstrap (setDefaultSettings(true), only
+    // when loadSettings() found nothing saved yet), and writing it here
+    // would make on_ws_open()'s zoomLevelExplicitlySet check see it as
+    // "the user chose this" on every future load - permanently
+    // overriding the server's real-front-end-derived default with this
+    // function's own fixed fallback (6) before the user ever touched the
+    // zoom control. saveSettings() (called on genuine user interaction)
+    // still persists it normally once they actually do.
     try { localStorage.setItem("min_db", spectrum.min_db.toString()); } catch (e) {}
     try { localStorage.setItem("max_db", spectrum.max_db.toString()); } catch (e) {}
     try { localStorage.setItem("graticuleIncrement", spectrum.graticuleIncrement.toString()); } catch (e) {}
@@ -4169,6 +4227,7 @@ function loadSettings() {
   try { document.getElementById("meter").value = meterIndex; } catch (e) {}
   meterType = meterIndex;
 
+  try { zoomLevelExplicitlySet = (localStorage.getItem("zoom_level") !== null); } catch (e) { zoomLevelExplicitlySet = false; }
   const zoomLv = getLS("zoom_level", v => parseInt(v, 10), target_zoom_level);
   try { document.getElementById("zoom_level").value = zoomLv; } catch (e) {}
   target_zoom_level = zoomLv;
