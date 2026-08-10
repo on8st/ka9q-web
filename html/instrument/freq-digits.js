@@ -85,6 +85,7 @@ export function createDigitDisplay(container, onStep, numDigits = NUM_DIGITS) {
   container.addEventListener("dblclick", (e) => {
     e.stopPropagation();
     const input = document.createElement("input");
+    input.id = "freq-entry";
     input.className = "freq-entry";
     input.value = (currentHz / 1000).toFixed(3);
     container.innerHTML = "";

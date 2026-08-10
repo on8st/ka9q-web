@@ -21,7 +21,11 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function idsIn(text) {
   const ids = new Set();
+  // HTML-attribute style (id="x") and JS property-assignment style
+  // (el.id = "x", used for elements created dynamically at runtime -
+  // e.g. freq-digits.js's double-click-to-type input).
   for (const m of text.matchAll(/\bid=["']([a-zA-Z0-9_-]+)["']/g)) ids.add(m[1]);
+  for (const m of text.matchAll(/\.id\s*=\s*["']([a-zA-Z0-9_-]+)["']/g)) ids.add(m[1]);
   return ids;
 }
 

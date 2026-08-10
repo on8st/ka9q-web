@@ -12,14 +12,14 @@
 // or null if not yet built. A string here is a claim the check verifies;
 // null is an honest, checked-in gap, not a silent omission.
 export const PARITY_MANIFEST = [
-  { feature: "Frequency tuning (type exact value)", stockIds: ["freq"], instrumentId: "tune-input" },
+  { feature: "Frequency tuning (type exact value)", stockIds: ["freq"], instrumentId: "freq-entry" },
   { feature: "Frequency tuning (click-to-step digits)", stockIds: ["freq"], instrumentId: "vfo-digits" },
   { feature: "Mode selection", stockIds: ["mode"], instrumentId: "tuned-mode" },
   { feature: "Tuning step size", stockIds: ["step"], instrumentId: "step-value" },
   { feature: "Band quick-select", stockIds: ["band", "band_category"], instrumentId: "band-chips" },
-  { feature: "Memory save", stockIds: ["save_memory", "memory_desc"], instrumentId: "memory-save" },
-  { feature: "Memory recall", stockIds: ["recall_memory", "memory_select"], instrumentId: "memory-chips" },
-  { feature: "Memory delete", stockIds: ["delete_memory"], instrumentId: "memory-chips" },
+  { feature: "Memory save", stockIds: ["save_memory", "memory_desc"], instrumentId: "mem-save" },
+  { feature: "Memory recall", stockIds: ["recall_memory", "memory_select"], instrumentId: "mem-list" },
+  { feature: "Memory delete", stockIds: ["delete_memory"], instrumentId: "mem-list" },
   { feature: "Memory import/export as a set", stockIds: ["import_memories", "export_memories", "import_memories_btn"], instrumentId: null },
   { feature: "Zoom level", stockIds: ["zoom_level", "zoomplus", "zoomminus"], instrumentId: null },
   { feature: "Zoom to a clicked centre", stockIds: ["zoomcenter"], instrumentId: null },
@@ -46,7 +46,7 @@ export const PARITY_MANIFEST = [
   { feature: "PCM/Opus output toggle", stockIds: ["pcm_checkbox"], instrumentId: null },
   { feature: "Audio recording", stockIds: ["toggleRecording"], instrumentId: null },
   { feature: "S-meter metric (Signal/SNR/OVR)", stockIds: ["meter"], instrumentId: null },
-  { feature: "S-meter style (bar vs analog)", stockIds: ["ckAnalogSMeter"], instrumentId: "meter-settings" },
+  { feature: "S-meter style (bar vs analog)", stockIds: ["ckAnalogSMeter"], instrumentId: "ck-analog" },
   { feature: "Show ham band edge markers", stockIds: ["ckShowBandEdges"], instrumentId: null },
   { feature: "Hide DC/centre-bin spike (this fork's own feature)", stockIds: ["ckHideDcSpike"], instrumentId: null },
   { feature: "Spectrum fill style", stockIds: ["ckNoSpectrumFill"], instrumentId: null },
