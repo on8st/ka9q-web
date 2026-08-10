@@ -112,3 +112,45 @@ test("PING is ignored without throwing or firing any event", () => {
   assert.doesNotThrow(() => client._onTextMessage("PING"));
   assert.equal(fired, false);
 });
+
+// Node has no global WebSocket by default (real browsers always do) -
+// _sendCommand's readyState check needs the WebSocket.OPEN constant to
+// exist. This is a test-only shim, not a change to what ships.
+globalThis.WebSocket ??= { OPEN: 1 };
+
+function mockSocket() {
+  const sent = [];
+  return { sent, ws: { readyState: WebSocket.OPEN, send: (msg) => sent.push(msg) } };
+}
+
+test("tune() sends F:<khz> wrapped in the C:<clientId>:<seq> envelope", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  client.clientId = "ctest";
+  const { sent, ws } = mockSocket();
+  client._ws = ws;
+
+  client.tune(145_500_000);
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0], "C:ctest:1:F:145500.000");
+});
+
+test("setMode() sends M:<mode> wrapped the same way, with an incrementing seq", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  client.clientId = "ctest";
+  const { sent, ws } = mockSocket();
+  client._ws = ws;
+
+  client.tune(14_250_000);
+  client.setMode("usb");
+
+  assert.equal(sent[0], "C:ctest:1:F:14250.000");
+  assert.equal(sent[1], "C:ctest:2:M:usb");
+});
+
+test("commands are silently dropped when the socket isn't open (no throw)", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  client._ws = { readyState: 0 /* CONNECTING */, send: () => { throw new Error("should not be called"); } };
+  assert.doesNotThrow(() => client.tune(14_250_000));
+  assert.doesNotThrow(() => client.setMode("fm"));
+});

@@ -62,6 +62,14 @@ export class Ka9qWebClient extends EventTarget {
     this._sendCommand(`F:${khz}`);
   }
 
+  /** Sends a mode/preset change. Unlike tune(), success is NOT echoed back
+   * (see PROTOCOL-TEXT.md "Mode confirmation is asymmetric with frequency
+   * confirmation") - the ACK is the only confirmation a caller will get
+   * that this reached the server at all. */
+  setMode(mode) {
+    this._sendCommand(`M:${mode}`);
+  }
+
   _sendCommand(raw) {
     if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
     this.seq += 1;

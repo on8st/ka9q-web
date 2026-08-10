@@ -31,6 +31,21 @@
   .vfo-digit:hover { background: #222; }
   .vfo-sep { display: inline-block; width: 0.4ch; }
   .vfo-hint { color: #888; font-size: 0.8rem; margin: 0.3rem 0 1rem; }
+
+  .value-anchor { cursor: pointer; border-bottom: 1px dotted #666; }
+  .value-anchor:hover { border-bottom-color: #6cf; }
+  .value-panel {
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 0.4rem;
+    display: grid;
+    grid-template-columns: repeat(4, auto);
+    gap: 0.3rem;
+    z-index: 10;
+  }
+  .value-panel button { background: #222; color: #ddd; border: 1px solid #444; border-radius: 3px; }
+  .value-panel button:hover { background: #333; }
 </style>
 </head>
 <body>

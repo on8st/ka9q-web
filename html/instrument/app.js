@@ -4,8 +4,13 @@
 // panels, spectrum/waterfall display) gets built on top of it.
 import { Ka9qWebClient } from "./ws-client.js";
 import { createDigitDisplay } from "./freq-digits.js";
+import { createValuePanel } from "./value-panel.js";
 
 const $ = (id) => document.getElementById(id);
+
+// Confirmed against the stock UI's own mode <select> (html/radio.html) -
+// wusb/wlsb are commented out there too, so left out here as well.
+const MODES = ["cwu", "cwl", "usb", "lsb", "am", "sam", "fm", "iq", "isb", "user1", "user2", "user3"];
 
 function fmtMHz(hz) {
   if (hz === null || hz === undefined) return "—";
@@ -47,6 +52,25 @@ client.addEventListener("tunedFreq", (e) => {
 
 client.addEventListener("mode", (e) => {
   $("tuned-mode").textContent = e.detail.mode;
+});
+
+// "The readout is the control surface": clicking the mode value opens its
+// own picker anchored to it. Mode-setting has no reliable success echo
+// (see PROTOCOL-TEXT.md "Mode confirmation is asymmetric with frequency
+// confirmation") - ACK is the only confirmation a command reached the
+// server at all, so this updates its own display optimistically on
+// selection rather than waiting for a "mode" event that a clean success
+// will never produce. A genuine M_FORCE (drift correction) still updates
+// it authoritatively via the listener above.
+createValuePanel($("tuned-mode"), (panel, close) => {
+  panel.innerHTML = MODES.map((m) => `<button type="button" data-mode="${m}">${m.toUpperCase()}</button>`).join("");
+  panel.addEventListener("click", (e) => {
+    const mode = e.target.dataset.mode;
+    if (!mode) return;
+    client.setMode(mode);
+    $("tuned-mode").textContent = mode;
+    close();
+  });
 });
 
 client.addEventListener("busy", (e) => {
