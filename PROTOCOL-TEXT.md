@@ -18,8 +18,8 @@ it, per this fork's own "tests before code" convention (see
 | `BFREQ:<val>` | `BFREQ:10000000.000` | Current backend (tuned) frequency. **Unit is ambiguous by design** - `radio.js` treats `val > 1000000` as already-Hz, otherwise kHz (`html/radio.js:~1284`). **Not a reliable on-connect snapshot** - see "Sessions are reattached, not recreated" below. |
 | `BFREQ_FORCE:<val>` | same as `BFREQ` | Same meaning, but the client must apply it unconditionally (used after reconnect/session recovery to override any locally-adopted value). |
 | `SHIFT:<hz>` | `SHIFT:0.000` | BFO/shift frequency in Hz. Confirmed always sent on connect (`process_status_packet()` in `ka9q-web.c` sends it unconditionally whenever the backend's shift value differs from what this session was last told - and a freshly attached session has never been told anything). |
-| `M:<mode>` | `M:usb` | Current demod mode/preset, lowercase. Not observed on any of the three live instances during this research (no active session currently has a mode set - see "Confirmed live" below). |
-| `M_FORCE:<mode>` | same as `M` | Forced mode update, applied unconditionally (same reconnect-recovery purpose as `BFREQ_FORCE`). |
+| `M:<mode>` | `M:usb` | Current demod mode/preset, lowercase. **Not actually sent by this server version at all** - see "Mode confirmation is asymmetric with frequency" below. `radio.js` still handles it (dead code path against this server, or a compatibility fallback for an older one). |
+| `M_FORCE:<mode>` | same as `M` | The **only** mode notification this server actually sends - and only when adopting a backend-changed preset with no recent local command (see below). |
 | `ACK:<clientId>:<seq>` | `ACK:ab12cd34:7` | Acknowledges a command this client sent with that `clientId`/`seq` (see outbound envelope below). |
 | `BUSY:<reason>` | `BUSY:session limit reached` | Session rejected; client shows a popup and stops reconnecting. |
 | `ZSIZE:...` | - | Zoom-table size/state; not yet decoded here (out of scope for this pass - only frequency/mode were researched). |
@@ -36,13 +36,40 @@ exist for zoom, spectrum settings, memories, etc., out of scope here):
 | Raw command | Example | Meaning |
 |---|---|---|
 | `F:<khz>` | `F:14250.000` | Set frequency, in **kHz**, 3 decimals (Hz precision) - `ws.send('F:' + (Math.round(fVal)/1000.0).toFixed(3))`. Note this is kHz even though the inbound `BFREQ` echo of the same value is ambiguous-by-magnitude - the outbound format is NOT ambiguous. |
+| `M:<mode>` | `M:usb` | Set mode/preset, lowercase - `sendControl('mode', "M:" + selected_mode, ...)` (`html/radio.js:2956`), same `wrapControlMessage` envelope as `F:`. Confirmed live 2026-08-10: `C:ctest002:1:M:usb` to the real VHF instance got `ACK:ctest002:1` - see below for why no further confirmation follows. |
 | `Z:SIZE` | `Z:SIZE` | Requests current zoom table size (out of scope - zoom/spectrum display work is separate from this pass). |
 
-Mode-setting's raw wire command was not directly located as a `ws.send()`
-call site during this pass (only `F:` and `Z:*` were confirmed as
-send-side) - `setMode()` in `radio.js` needs a closer read before any
-instrument-UI mode-setting code is written. **Flagging as unverified
-rather than guessing the format.**
+## Mode confirmation is asymmetric with frequency confirmation (2026-08-10)
+
+Sending `M:usb` produces only an `ACK` - no `M:` or `M_FORCE:` follows,
+even once the mode genuinely takes effect. This is **not** a bug or a
+timing fluke; it's the server's actual logic (`process_status_packet()`,
+`ka9q-web.c:~3894`):
+
+- The moment your own `M:<mode>` command is handled, `control_set_mode()`
+  synchronously sets `sp->requested_preset = <mode>` (`ka9q-web.c:2603`)
+  - your session now already "knows" what it asked for.
+- On every subsequent status poll, the server compares `Channel.preset`
+  (what the backend actually reports) against your session's
+  `requested_preset`. **If they match, nothing is sent** - there is no
+  "confirmed" notification for a command that succeeded exactly as asked.
+- A notification (`M_FORCE:<preset>`) is sent only when they *don't*
+  match **and** no recent local command exists (`client_recent`, a 5s
+  window) - i.e. only to report *drift* (something else changed the
+  preset), never to confirm your own request. If a mismatch persists
+  with a recent local command, the server just re-sends your own
+  requested preset internally after 5 failed poll cycles - still no
+  message to the browser either way.
+
+**Frequency doesn't have this gap** - `BFREQ`'s unconditional
+`backend_changed` check (`ka9q-web.c:~3950`, documented above) fires on
+*any* real change regardless of whose command caused it or how recently.
+Mode has no equivalent unconditional-on-change branch, only the
+mismatch/drift-adoption one. **Practical consequence: a mode-setting UI
+cannot wait for a state echo the way frequency-tuning can** - `ACK`
+receipt is the only signal a mode command actually reached the server;
+whether it was *applied* has to be trusted (or inferred some other way,
+e.g. polling `Channel.preset` isn't exposed to the browser at all today).
 
 ## Sessions are reattached by client IP, not recreated per connection (2026-08-10, corrects an earlier wrong reading of this doc)
 
