@@ -38,6 +38,12 @@ export function stepFreqAtDigit(hz, digitIndexFromRight, direction) {
 export function createDigitDisplay(container, onStep, numDigits = NUM_DIGITS) {
   container.classList.add("digits");
   let currentHz = 0;
+  // While the exact-value input is open, incoming server updates (e.g. the
+  // periodic tunedFreq echo - PROTOCOL-TEXT.md) must not overwrite
+  // container.innerHTML out from under the user's typing/focus. render()
+  // still records the latest value so the digits reflect it the moment
+  // editing ends.
+  let editing = false;
 
   function renderDigits() {
     const s = digitsForFreq(currentHz, numDigits);
@@ -55,7 +61,7 @@ export function createDigitDisplay(container, onStep, numDigits = NUM_DIGITS) {
 
   function render(hz) {
     currentHz = hz;
-    renderDigits();
+    if (!editing) renderDigits();
   }
   render(0);
 
@@ -84,6 +90,7 @@ export function createDigitDisplay(container, onStep, numDigits = NUM_DIGITS) {
   }, { passive: false });
   container.addEventListener("dblclick", (e) => {
     e.stopPropagation();
+    editing = true;
     const input = document.createElement("input");
     input.id = "freq-entry";
     input.className = "freq-entry";
@@ -93,6 +100,7 @@ export function createDigitDisplay(container, onStep, numDigits = NUM_DIGITS) {
     input.focus();
     input.select();
     const commit = () => {
+      editing = false;
       const v = parseFloat(input.value.replace(/[^0-9.]/g, ""));
       if (Number.isFinite(v)) onStep(Math.round(v * 1000));
       else renderDigits();
@@ -101,7 +109,7 @@ export function createDigitDisplay(container, onStep, numDigits = NUM_DIGITS) {
     input.addEventListener("keydown", (ev) => {
       ev.stopPropagation();
       if (ev.key === "Enter") commit();
-      if (ev.key === "Escape") renderDigits();
+      if (ev.key === "Escape") { editing = false; renderDigits(); }
     });
   });
 

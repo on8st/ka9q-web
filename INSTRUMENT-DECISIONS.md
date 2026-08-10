@@ -224,3 +224,25 @@ Full derivation and the exact diff rationale: `PROTOCOL-SPECTRUM.md`'s
 gated on the wire-confirmed `isreal` flag rather than a demod-type guess,
 it's provably inert for VHF (unchanged code path) regardless of whether
 the original "HF-specific legacy demod" hypothesis was the full story.
+
+**A fifth issue, found while re-checking the HF "type an exact frequency"
+flow** (`html/instrument/freq-digits.js`'s double-click-to-type input,
+`freq-entry`): typing a value and hitting Enter intermittently failed to
+take effect, and a Playwright check driving the same flow intermittently
+timed out waiting on `#freq-entry` mid-fill. Root cause: `app.js` re-renders
+the whole digit display (`digitDisplay.render(hz)`, a full
+`container.innerHTML` replacement) on every `tunedFreq` event from the
+server - the periodic status echo documented in `PROTOCOL-TEXT.md`, which
+arrives independently of anything the user is doing. If one of those
+echoes lands while the exact-value input is open, it silently destroys the
+live, focused `<input>` out from under the user's typing - a real race,
+not a flake, and consistently reproducible on a live receiver with regular
+status traffic. Fixed with an `editing` flag in `createDigitDisplay`:
+`render()` still records the incoming value but skips the DOM rebuild
+while `editing` is true; the flag clears on commit (Enter/blur) or Escape,
+so the *next* render (typically the server's own echo of the just-typed
+value) redraws normally. Covered by a DOM-stub unit test in
+`tests/js/freq-digits.test.mjs` (same minimal-stub pattern as
+`meter.test.mjs`, no jsdom dependency) rather than only a live Playwright
+check, since the race is about `render()`'s own contract and doesn't need
+a real browser to verify.
