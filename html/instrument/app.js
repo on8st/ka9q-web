@@ -1,10 +1,9 @@
-// Live status + basic tuning for this instrument-UI instance. Minimal by
-// design: proves the real data pipeline (both wire protocols, decoded and
-// verified against real traffic - see PROTOCOL-TEXT.md and
-// tests/js/ws-client.test.mjs) end-to-end, before any of the design
-// brief's richer interaction (click-to-tune digits, per-value panels,
-// spectrum/waterfall display) gets built on top of it.
+// Live status + tuning for this instrument-UI instance. Still minimal:
+// proves the real data pipeline and the brief's "tuning happens on the
+// digits" behaviour end-to-end, before richer interaction (per-value
+// panels, spectrum/waterfall display) gets built on top of it.
 import { Ka9qWebClient } from "./ws-client.js";
+import { createDigitDisplay } from "./freq-digits.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -16,6 +15,15 @@ function fmtMHz(hz) {
 const client = new Ka9qWebClient(
   (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/",
 ).connect();
+
+// "Tuning happens on the digits": clicking a digit's upper/lower half
+// steps that place value and sends a real tune command immediately.
+// Deliberately doesn't optimistically update its own display - it waits
+// for the server's own tunedFreq echo, same "server state is
+// authoritative" posture ka9q-web.c itself takes (see PROTOCOL-TEXT.md).
+// A genuine change always triggers that echo; only a no-op step wouldn't,
+// and a no-op step needs no visual update anyway.
+const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => client.tune(newHz));
 
 client.addEventListener("open", () => { $("conn-state").textContent = "connected"; });
 client.addEventListener("close", () => { $("conn-state").textContent = "disconnected"; });
@@ -34,6 +42,7 @@ client.addEventListener("tunedFreq", (e) => {
   const { hz } = e.detail;
   $("tuned-freq").textContent = `${fmtMHz(hz)} MHz`;
   $("tune-input").value = (hz / 1000).toFixed(3);
+  digitDisplay.render(hz);
 });
 
 client.addEventListener("mode", (e) => {

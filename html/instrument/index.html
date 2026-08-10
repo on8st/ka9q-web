@@ -12,6 +12,25 @@
   button { padding: 0.3rem 0.8rem; }
   ul { padding-left: 1.2rem; }
   a { color: #6cf; }
+
+  .vfo-digits {
+    font-family: "DejaVu Sans Mono", monospace;
+    font-size: 2.2rem;
+    letter-spacing: 0.05em;
+    user-select: none;
+  }
+  .vfo-digit {
+    display: inline-block;
+    width: 1.1ch;
+    text-align: center;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .vfo-digit:hover { background: #222; }
+  .vfo-sep { display: inline-block; width: 0.4ch; }
+  .vfo-hint { color: #888; font-size: 0.8rem; margin: 0.3rem 0 1rem; }
 </style>
 </head>
 <body>
@@ -26,8 +45,11 @@
   <dt>Mode</dt><dd id="tuned-mode">—</dd>
 </dl>
 
+<div id="vfo-digits" class="vfo-digits"></div>
+<p class="vfo-hint">Click the upper half of a digit to raise it, the lower half to lower it (Hz).</p>
+
 <form id="tune-form">
-  <label>Tune to (kHz): <input id="tune-input" type="text" inputmode="decimal" size="12"></label>
+  <label>Or type an exact frequency (kHz): <input id="tune-input" type="text" inputmode="decimal" size="12"></label>
   <button type="submit">Tune</button>
 </form>
 
