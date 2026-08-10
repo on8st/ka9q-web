@@ -19,6 +19,7 @@ import {
   asText,
   decodeChannelDataFields,
 } from "./status-decode.js";
+import { decodeSpectrumFrame } from "./spectrum-decode.js";
 
 function parseBfreq(raw) {
   const v = parseFloat(raw);
@@ -79,6 +80,11 @@ export class Ka9qWebClient extends EventTarget {
   _onMessage(evt) {
     if (typeof evt.data === "string") {
       this._onTextMessage(evt.data);
+      return;
+    }
+    const spectrum = decodeSpectrumFrame(evt.data);
+    if (spectrum) {
+      this.dispatchEvent(new CustomEvent("spectrum", { detail: spectrum }));
       return;
     }
     const fields = decodeChannelDataFields(evt.data);

@@ -9,10 +9,13 @@ import { STEP_OPTIONS_HZ, applyStep, fmtStep } from "./tune-step.js";
 import { bandsInCoverage } from "./band-options.js";
 import { loadMemories, addMemory, deleteMemory } from "./memories.js";
 import { createMeter } from "./meter.js";
+import { createSpectrumDisplay } from "./spectrum-canvas.js";
+import { absoluteCenterHz } from "./spectrum-decode.js";
 
 const $ = (id) => document.getElementById(id);
 let currentFreqHz = null;
 let stepHz = 1000;
+let frontendFrequencyHz = 0; // FIRST_LO_FREQUENCY, needed to make spectrum's baseband-relative centerHz absolute (PROTOCOL-SPECTRUM.md)
 
 // Confirmed against the stock UI's own mode <select> (html/radio.html) -
 // wusb/wlsb are commented out there too, so left out here as well.
@@ -36,6 +39,17 @@ const client = new Ka9qWebClient(
 // and a no-op step needs no visual update anyway.
 const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => client.tune(newHz));
 
+// "The receiver fills the screen. Spectrum and waterfall take all
+// available height." Absolute frequency axis needs the front end's real
+// tuned centre added to the packet's baseband-relative centerHz - the
+// same correction this fork's frequency-offset fix already applies to
+// tuned-frequency display (PROTOCOL-SPECTRUM.md).
+const spectrumDisplay = createSpectrumDisplay($("display-area"));
+client.addEventListener("spectrum", (e) => {
+  const abs = absoluteCenterHz(e.detail, frontendFrequencyHz);
+  spectrumDisplay.render({ ...e.detail, centerHz: abs });
+});
+
 client.addEventListener("open", () => { $("conn-state").textContent = "connected"; });
 client.addEventListener("close", () => { $("conn-state").textContent = "disconnected"; });
 
@@ -43,6 +57,7 @@ const meter = createMeter($("fe-power"));
 
 client.addEventListener("frontend", (e) => {
   const fe = e.detail;
+  frontendFrequencyHz = fe.frequencyHz || 0;
   $("fe-desc").textContent = fe.descriptionText || "(unknown front end)";
   const lowHz = fe.frequencyHz + (fe.ifLowHz ?? 0);
   const highHz = fe.frequencyHz + (fe.ifHighHz ?? 0);

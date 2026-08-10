@@ -15,7 +15,7 @@ import { Ka9qWebClient } from "../../html/instrument/ws-client.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(__dirname, "..", "fixtures");
 
-function firstChannelDataFrame(fixtureName) {
+function firstFrameOfType(fixtureName, pktType) {
   const buf = readFileSync(path.join(FIXTURES, fixtureName));
   let offset = 0;
   while (offset + 4 <= buf.length) {
@@ -25,10 +25,14 @@ function firstChannelDataFrame(fixtureName) {
     offset += length;
     if (frame.byteLength >= 12) {
       const word0 = new DataView(frame).getUint32(0, false);
-      if (((word0 >> 16) & 0x7f) === 0x7e) return frame;
+      if (((word0 >> 16) & 0x7f) === pktType) return frame;
     }
   }
-  throw new Error(`no Channel Data frame found in ${fixtureName}`);
+  throw new Error(`no 0x${pktType.toString(16)} frame found in ${fixtureName}`);
+}
+
+function firstChannelDataFrame(fixtureName) {
+  return firstFrameOfType(fixtureName, 0x7e);
 }
 
 test("binary frame updates client.frontend and fires a frontend event", () => {
@@ -43,6 +47,22 @@ test("binary frame updates client.frontend and fires a frontend event", () => {
   assert.equal(client.frontend.isReal, false);
   assert.ok(client.frontend.frequencyHz > 144_000_000 && client.frontend.frequencyHz < 148_000_000);
   assert.deepEqual(eventDetail, client.frontend);
+});
+
+test("spectrum frame fires a spectrum event and does not update frontend/frontend event", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  let spectrumDetail = null;
+  let frontendFired = false;
+  client.addEventListener("spectrum", (e) => { spectrumDetail = e.detail; });
+  client.addEventListener("frontend", () => { frontendFired = true; });
+
+  client._onMessage({ data: firstFrameOfType("vhf.bin", 0x7f) });
+
+  assert.ok(spectrumDetail, "spectrum event should have fired");
+  assert.equal(spectrumDetail.binCount, 1620);
+  assert.equal(spectrumDetail.binsDb.length, 1620);
+  assert.equal(spectrumDetail.inputSamprate, 2_400_000);
+  assert.equal(frontendFired, false, "a spectrum frame is not Channel Data and must not be mistaken for one");
 });
 
 test("BFREQ below the 1e6 threshold is interpreted as kHz", () => {

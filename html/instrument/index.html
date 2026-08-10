@@ -14,12 +14,9 @@
     flex: 1 1 auto;
     min-height: 0;
     background: #000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #555;
-    font-size: 0.9rem;
   }
+  .spectrum-display { display: flex; flex-direction: column; height: 100%; }
+  .spectrum-trace, .spectrum-waterfall { display: block; width: 100%; }
 
   #control-block {
     flex: 0 0 auto;
@@ -91,7 +88,7 @@
 </head>
 <body>
 
-<div id="display-area">Spectrum/waterfall display - not built yet</div>
+<div id="display-area"></div>
 
 <div id="control-block">
   <h1>ka9q-web instrument</h1>
