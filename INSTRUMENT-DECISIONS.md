@@ -102,3 +102,28 @@ anything else added so far, and is the one remaining step that requires
 touching those containers' compose files directly (and recreating them to
 pick up the new image) - deliberately not done as part of this decision,
 pending explicit sign-off.
+
+**Rolled out live (2026-08-10)**: compose files updated, image rebuilt,
+all three containers recreated with `--no-deps` (radiod-vhf/radiod-uhf/
+ka9q-radio confirmed untouched - `Id`/`Created` unchanged). Found one more
+thing only visible from a real multi-instance rollout: because discovery
+runs once, before this instance's own `ka9q-web` binary is listening, **an
+instance can never successfully query its own coverage and so never
+appears in its own `instances.json`** - each one's `instances.json` lists
+its two siblings only, never itself. Not a rollout glitch (did a
+`docker restart` pass, not recreate, once all three were on the new image
+so their lists reflect each other consistently) - it's inherent to
+one-shot, pre-exec discovery.
+
+**Decided against** turning discovery into a resident background
+supervisor (fork the real binary instead of exec, retry its own query
+once it's listening, refresh periodically) to fix this - real added
+complexity for a gap with a much simpler fix. **The eventual instrument
+UI itself already knows it's loaded on this exact instance** (it's about
+to open its own WebSocket connection to itself for real receiver data
+anyway) - it should synthesize its own `{id, fe, lowHz, highHz}` entry
+client-side from that connection and merge it with whatever
+`instances.json` reports about its siblings, rather than expecting
+`instances.json` to ever describe the instance serving it. No server or
+discovery-script change needed; this is a note for whoever builds the
+actual switcher UI, not a task for this discovery step.
