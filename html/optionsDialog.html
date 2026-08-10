@@ -16,6 +16,10 @@
                    <input type="checkbox" id="ckShowBandEdges" name="ckShowBandEdges" title="Show or hide ham band edge markers" onchange="setShowBandEdges(this.checked)">
                    <label for="ckShowBandEdges">Show Band Edges</label>
                 </div>
+                <div>
+                   <input type="checkbox" id="ckHideDcSpike" name="ckHideDcSpike" title="Interpolate over the front end's own DC/centre-bin spike in the display (cosmetic only - does not affect exported data or any receive channel)" onchange="setHideDcSpike(this.checked)">
+                   <label for="ckHideDcSpike">Hide DC Spike</label>
+                </div>
             </div>
         <div style="margin-top: 5px;">
            <input type="checkbox" id="ckAnalogSMeter" name="ckAnalogSMeter" onchange="setAnalogMeterVisible(this.checked)" title="Show or hide the analog S meter">

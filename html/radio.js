@@ -381,6 +381,13 @@
       var gps_time = 0;
       var input_samples = 0;
       var input_samprate = 0;
+      // Front end's real tuned RF centre (first LO frequency), e.g. 145000000 for a
+      // 2m RTL-SDR - not 0 like a direct-sampling HF receiver. New field, server-side
+      // fix required (encode_double(&bp, FIRST_LO_FREQUENCY, Frontend.frequency)).
+      var frontend_frequency_hz = 0;
+      var frontendFrequencyApplied = false; // one-shot: correct a stale/out-of-range
+                                             // default tune once we learn the real
+                                             // front end centre, then leave the user alone
       var noise_bw = 0;
       var rf_gain = 0;
       var rf_atten = 0;
@@ -507,6 +514,7 @@
       var onlyAutoscaleByButton = false;
       var enableAnalogSMeter = false;
       var enableBandEdges = false;
+      var hideDcSpike = true;
       // pending spectrum average to send once websocket opens
       var pendingSpectrumAverage = null;
       // pending window prefs to send once websocket opens
@@ -1690,6 +1698,69 @@ function applyQuickBW() {
                     break;
                   case 10: // INPUT_SAMPRATE (variable-length big-endian uint)
                     { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); input_samprate = _v; }
+                    // Also keep spectrum.input_samprate in sync here, not just from the
+                    // separate spectrum-data (0x7F) path - checkFrequencyIsValid/setCenterHz/
+                    // setSpanHz all read spectrum.input_samprate, and on first connect this
+                    // 0x7E channel-data packet can arrive before any 0x7F spectrum packet
+                    // ever has, leaving it unset when it's needed.
+                    spectrum.input_samprate = input_samprate;
+                    i += l;
+                    break;
+                  case 100: // FE_LOW_EDGE (compressed float32, big-endian) - front end's real IF window low edge
+                    { const b = new Uint8Array(4); for (let _k = 0; _k < l; _k++) b[4 - l + _k] = view.getUint8(i + _k); spectrum.minIF = new DataView(b.buffer).getFloat32(0, false); }
+                    i += l;
+                    break;
+                  case 101: // FE_HIGH_EDGE (compressed float32, big-endian) - front end's real IF window high edge
+                    { const b = new Uint8Array(4); for (let _k = 0; _k < l; _k++) b[4 - l + _k] = view.getUint8(i + _k); spectrum.maxIF = new DataView(b.buffer).getFloat32(0, false); }
+                    i += l;
+                    break;
+                  case 102: // FE_ISREAL (compressed bool) - true if the front end uses real (not complex/IQ) sampling
+                    { let _v = 0; for (let _k = 0; _k < l; _k++) _v = (_v * 256) + view.getUint8(i + _k); spectrum.isReal = (_v !== 0); }
+                    i += l;
+                    break;
+                  case 34: // FIRST_LO_FREQUENCY (float64, big-endian) - front end's real tuned centre
+                    try {
+                      const fbuf = evt.data.slice(i, i + l);
+                      if (fbuf.byteLength >= 8) {
+                        const val = new DataView(fbuf).getFloat64(0, false);
+                        if (Number.isFinite(val) && val > 0) {
+                          frontend_frequency_hz = val;
+                          spectrum.frontendFrequencyHz = val;
+                          // One-shot correction: if the currently tuned frequency
+                          // (e.g. the hardcoded 10MHz WWV default, meant for HF) is
+                          // outside what this front end can actually receive, retune
+                          // somewhere valid instead of leaving a stuck, out-of-range
+                          // channel around. (The DC/LO leakage spike at this exact
+                          // frequency is handled at the radiod config level - see
+                          // vhf/config/radiod@vhf.conf.d/01-rtlsdr.conf - not by
+                          // avoiding it here.)
+                          //
+                          // Retune to the MIDDLE of the valid IF window, not to `val`
+                          // (the front end's own tuned centre) directly: for a
+                          // real-sampling front end (Airspy) the centre itself sits
+                          // OUTSIDE the valid window (that's exactly what makes the
+                          // window asymmetric - see spectrum.js getIfBounds()), so
+                          // setFrequencyW()'s own validity check correctly rejects
+                          // retuning there and silently bails out, leaving the whole
+                          // self-heal a no-op. The midpoint is always valid and, for
+                          // a symmetric window (RTL-SDR complex/IQ), is identical to
+                          // `val` - no behaviour change for the case this was
+                          // originally written for.
+                          if (!frontendFrequencyApplied) {
+                            frontendFrequencyApplied = true;
+                            if (!spectrum.checkFrequencyIsValid(spectrum.frequency)) {
+                              const freqBox = document.getElementById('freq');
+                              if (freqBox) {
+                                const ifBounds = spectrum.getIfBounds();
+                                const target = val + (ifBounds.lo + ifBounds.hi) / 2;
+                                freqBox.value = (target / 1000.0).toFixed(3);
+                                if (typeof setFrequencyW === 'function') setFrequencyW(false);
+                              }
+                            }
+                          }
+                        }
+                      }
+                    } catch (e) {}
                     i += l;
                     break;
                   case 13: // INPUT_SAMPLES (variable-length big-endian uint64)
@@ -3805,6 +3876,7 @@ function saveSettings() {
   localStorage.setItem("onlyAutoscaleByButton", document.getElementById("ckonlyAutoscaleButton").checked.toString());
   localStorage.setItem("enableAnalogSMeter",enableAnalogSMeter);
   localStorage.setItem("enableBandEdges", enableBandEdges);
+  localStorage.setItem("hideDcSpike", hideDcSpike);
   try { localStorage.setItem("keepFreqCentered", (document.getElementById("ckKeepFreqCentered") && document.getElementById("ckKeepFreqCentered").checked) ? "true" : "false"); } catch (e) {}
   var volumeControlNumber = document.getElementById("volume_control").valueAsNumber;
   //console.log("Saving volume control: ", volumeControl);
@@ -3932,6 +4004,9 @@ function setDefaultSettings(writeToStorage = true) {
   enableBandEdges = false; // Default to not show band edges
   var beEl = document.getElementById('ckShowBandEdges');
   if (beEl) beEl.checked = enableBandEdges;
+  hideDcSpike = true; // Default to hiding the DC/centre-bin spike
+  var dcEl = document.getElementById('ckHideDcSpike');
+  if (dcEl) dcEl.checked = hideDcSpike;
   const MEMORY_KEY = 'frequency_memories';
   // Use 50 entries to match the memories subsystem expectations
   // Each memory is an object: { freq: string, desc: string, mode: string }
@@ -3977,6 +4052,7 @@ function setDefaultSettings(writeToStorage = true) {
     try { localStorage.setItem("onlyAutoscaleByButton", (document.getElementById("ckonlyAutoscaleButton") && document.getElementById("ckonlyAutoscaleButton").checked) ? "true" : "false"); } catch (e) {}
     try { localStorage.setItem("enableAnalogSMeter", enableAnalogSMeter ? "true" : "false"); } catch (e) {}
     try { localStorage.setItem("enableBandEdges", enableBandEdges ? "true" : "false"); } catch (e) {}
+    try { localStorage.setItem("hideDcSpike", hideDcSpike ? "true" : "false"); } catch (e) {}
   }
 }
 
@@ -4085,6 +4161,9 @@ function loadSettings() {
 
   enableBandEdges = getLS("enableBandEdges", v => (v === "true"), enableBandEdges);
   try { const beEl = document.getElementById('ckShowBandEdges'); if (beEl) beEl.checked = enableBandEdges; } catch (e) {}
+
+  hideDcSpike = getLS("hideDcSpike", v => (v === "true"), hideDcSpike);
+  try { const dcEl = document.getElementById('ckHideDcSpike'); if (dcEl) dcEl.checked = hideDcSpike; } catch (e) {}
   // adoptOnParameterMismatch client-side option removed; adoption is driven by backend shift
   // Keep Frequency Centered (KFC) persisted setting
   const kfcVal = getLS("keepFreqCentered", v => (v === "true"), false);
@@ -4108,6 +4187,7 @@ function loadSettings() {
   } catch (e) {}
   if (typeof spectrum !== 'undefined' && spectrum) {
     spectrum.showBandEdges = enableBandEdges;
+    spectrum.hideDcSpike = hideDcSpike;
     spectrum.updateAxes();
     // ensure UI reflects loaded spectrum average
     try { const sa = document.getElementById('spectrum_average_input'); if (sa) sa.value = spectrum_average; } catch (e) {}
@@ -4170,7 +4250,7 @@ function diagnosticCheckSettings(showAlert = true) {
     "averaging","maxHold","paused","decay","cursor_active",
     "preset","step","colorIndex","meterIndex","cursor_freq",
     "check_max","check_min","switchModesByFrequency","onlyAutoscaleByButton",
-    "enableAnalogSMeter","enableBandEdges","volume_control","frequency_memories"
+    "enableAnalogSMeter","enableBandEdges","hideDcSpike","volume_control","frequency_memories"
   ];
   const missing = expected.filter(k => {
     try { return localStorage.getItem(k) === null; } catch (e) { return true; }
@@ -4259,7 +4339,11 @@ const bandOptions = {
         { label: "15M", freq: 21300000 },
         { label: "12M", freq: 24930000 },
         { label: "10M", freq: 28500000 },
-	{ label: "6M",  freq: 50100000 }
+	{ label: "6M",  freq: 50100000 },
+	// 2m/70cm added - the stock list stopped at 6M, presumably because this
+	// tool historically only ever pointed at HF/direct-sampling front ends.
+	{ label: "2M", freq: 145500000 },
+	{ label: "70CM", freq: 433500000 }
     ],
     broadcast: [
         { label: "120M", freq:2397500 },
@@ -4376,6 +4460,22 @@ function setShowBandEdges(checked) {
     }
   } catch (e) {}
   try { localStorage.setItem('enableBandEdges', checked ? 'true' : 'false'); } catch (e) {}
+  try { if (typeof saveSettings === 'function') saveSettings(); } catch (e) {}
+}
+
+// Toggle for Spectrum.prototype.interpolateDcSpike - see spectrum.js for
+// what it actually does and why it's safe (display-only, never touches
+// exported data or any receive channel).
+function setHideDcSpike(checked) {
+  try { window.hideDcSpike = !!checked; } catch (e) {}
+  try { hideDcSpike = !!checked; } catch (e) {}
+  try {
+    if (typeof spectrum !== 'undefined' && spectrum) {
+      spectrum.hideDcSpike = !!checked;
+      if (spectrum.bin_copy) spectrum.drawSpectrumWaterfall(spectrum.bin_copy, false);
+    }
+  } catch (e) {}
+  try { localStorage.setItem('hideDcSpike', checked ? 'true' : 'false'); } catch (e) {}
   try { if (typeof saveSettings === 'function') saveSettings(); } catch (e) {}
 }
 
@@ -4708,9 +4808,18 @@ window.zoomTable = [
   { bin_width: 20000, bin_count: 1620 },
   { bin_width: 10000, bin_count: 1620 },
   { bin_width: 8000, bin_count: 1620 },
+  // Must match the server's zoom_table[] in ka9q-web.c exactly (same index
+  // order) - 5432 Hz gives 8,799,840 Hz, the closest achievable step to
+  // the Airspy R2's confirmed 8.8MHz real-sampling usable window without
+  // exceeding it (max_IF=-600kHz, min_IF=-0.47*20Msps, src/airspy.c).
+  { bin_width: 5432, bin_count: 1620 },
   { bin_width: 5000, bin_count: 1620 },
   { bin_width: 4000, bin_count: 1620 },
   { bin_width: 2000, bin_count: 1620 },
+  // Must match the server's zoom_table[] in ka9q-web.c exactly (same index
+  // order) - 1480 Hz gives 2,397,600 Hz, the closest achievable step to
+  // this station's full 2.4 Msps complex/IQ capture.
+  { bin_width: 1480, bin_count: 1620 },
   { bin_width: 1000, bin_count: 1620 },
   { bin_width: 800, bin_count: 1620 },
   { bin_width: 500, bin_count: 1620 },

@@ -689,9 +689,23 @@ const struct zoom_table_t zoom_table[] = {
   {20000, 1620},
   {10000, 1620},
   {8000, 1620},
+  // 5432 Hz added: gives 8,799,840 Hz (bin_width * 1620), the closest
+  // achievable step to the Airspy R2's real-sampling usable window
+  // (confirmed 8.8MHz: max_IF=-600kHz, min_IF=-0.47*20Msps, src/airspy.c)
+  // without exceeding it - same reasoning as the 1480Hz entry below for
+  // VHF's 2.4Msps complex/IQ capture. Without this, the widest achievable
+  // zoom was 5000Hz*1620=8.1MHz, leaving a ~700kHz gap versus what the
+  // hardware actually supports.
+  {5432, 1620},
   {5000, 1620},
   {4000, 1620},
   {2000, 1620},
+  // 1480 Hz added: gives a 2,397,600 Hz span (bin_width * 1620), the
+  // closest achievable step to this station's full 2.4 Msps complex/IQ
+  // capture without exceeding it. The next entry up (2000 -> 3,240,000 Hz)
+  // has always exceeded any samprate this station uses, leaving a gap
+  // between 1.62MHz and "as wide as the hardware actually captures".
+  {1480, 1620},
   {1000, 1620},
   {800, 1620},
   {500, 1620},
@@ -1122,6 +1136,28 @@ void websocket_closed(struct session *sp) {
   if (spectrum_join) pthread_join(spectrum_join, NULL);
 }
 
+// Effective valid IF window relative to Frontend.frequency, i.e. the true
+// receivable RF range is [Frontend.frequency + lo_if, Frontend.frequency +
+// hi_if]. Frontend.min_IF/max_IF are already decoded from FE_LOW_EDGE/
+// FE_HIGH_EDGE (decode_radio_status(), phase 4) and are populated by EVERY
+// front end this station uses - symmetrically for complex/IQ (rtlsdr.c:
+// +/-0.47*samprate) and asymmetrically, entirely below the tuned frequency,
+// for real-sampling ones (airspy.c: -0.47*samprate to -600kHz) - so using
+// them directly here replaces the old +/- samprate/2 symmetric-only
+// assumption for both cases at once, not just one. Falls back to the old
+// symmetric approximation only if a front end driver somehow never sets
+// them (defensive; not expected to trigger with rtlsdr.c or airspy.c).
+static void frontend_if_bounds(double *lo_if, double *hi_if){
+  if(!isnan(Frontend.min_IF) && !isnan(Frontend.max_IF) && Frontend.max_IF > Frontend.min_IF){
+    *lo_if = Frontend.min_IF;
+    *hi_if = Frontend.max_IF;
+  } else {
+    double const fs2 = round(Frontend.samprate / 2.0);
+    *lo_if = -fs2;
+    *hi_if = fs2;
+  }
+}
+
 static void check_frequency(struct session *sp) {
     if(sp->bins == 0 || sp->bin_width == 0 || Frontend.samprate == 0)
       return;
@@ -1133,14 +1169,28 @@ static void check_frequency(struct session *sp) {
 
     int freq_bin = ((int64_t)sp->frequency - min_f) / sp->bin_width;
 
-    int64_t fs2 = (int64_t)round(Frontend.samprate / 2.0);
+    // Valid RF range is [lo+lo_if, lo+hi_if] around the front end's real
+    // tuned centre (Frontend.frequency), not [0, fs2] - that assumption is
+    // only true for a direct-sampling HF receiver (RX888) where
+    // Frontend.frequency is ~0. For a tuner-based front end (RTL-SDR,
+    // Airspy) it is not, and the old assumption clamped center_freq to a
+    // negative value that wrapped around to a huge number when stored in
+    // the uint32_t sp->center_frequency (observed: 145000010 -> 4294547296).
+    // lo_if/hi_if come from Frontend.min_IF/max_IF (FE_LOW_EDGE/FE_HIGH_EDGE)
+    // - symmetric for complex/IQ front ends, asymmetric (entirely negative)
+    // for real-sampling ones - see frontend_if_bounds() above.
+    int64_t lo = (int64_t)round(Frontend.frequency);
+    double lo_if, hi_if;
+    frontend_if_bounds(&lo_if, &hi_if);
+    int64_t const lo_bound = lo + (int64_t)round(lo_if);
+    int64_t const hi_bound = lo + (int64_t)round(hi_if);
     if (freq_bin >= sp->bins) {
         int64_t target_bin = sp->bins - 30;
         int64_t new_min_f = (int64_t)sp->frequency - target_bin * sp->bin_width;
         int64_t new_center = new_min_f + (span / 2);
         int64_t new_max_f = new_center + (span / 2);
-        if (new_max_f > fs2) {
-            new_center = fs2 - (span / 2);
+        if (new_max_f > hi_bound) {
+            new_center = hi_bound - (span / 2);
             new_min_f = new_center - (span / 2);
         }
         center_freq = new_center;
@@ -1154,10 +1204,10 @@ static void check_frequency(struct session *sp) {
         freq_bin = (sp->frequency - min_f) / sp->bin_width;
     }
 
-    if (min_f < 0) {
-        center_freq = 0 + (span / 2);
-    } else if (max_f > fs2) {
-        center_freq = fs2 - (span / 2);
+    if (min_f < lo_bound) {
+        center_freq = lo_bound + (span / 2);
+    } else if (max_f > hi_bound) {
+        center_freq = hi_bound - (span / 2);
     }
 
     // Final recompute after any adjustments
@@ -1181,8 +1231,20 @@ static void zoom_to(struct session *sp, int level) {
     level = 0;
 
   if(Frontend.samprate != 0){
+    // Widest usable span is the width of the real valid IF window
+    // (Frontend.max_IF - Frontend.min_IF), not a flat samprate/2 assumption:
+    // that's only correct for a real-sampling front end whose window happens
+    // to be (close to) symmetric - a complex/IQ front end (RTL-SDR) captures
+    // close to the FULL sample rate around the tuned centre, and an
+    // asymmetric real-sampling front end (Airspy: -0.47*samprate to
+    // -600kHz) has a *different* width again. See frontend_if_bounds()
+    // above - this replaces the previous Frontend.isreal-based
+    // approximation with the actual measured window width.
+    double lo_if, hi_if;
+    frontend_if_bounds(&lo_if, &hi_if);
+    double const max_span = hi_if - lo_if;
     while(zoom_table[level].bin_width * zoom_table[level].bin_count
-	  > round(Frontend.samprate/2.0) && level < table_size)
+	  > max_span && level < table_size)
       level++;
     if(level == table_size)
       level--;
@@ -1204,16 +1266,26 @@ static void adjust_center_within_bounds(struct session *sp) {
 
   int64_t span = (int64_t)sp->bin_width * sp->bins;
   int64_t center_freq = (int64_t)sp->center_frequency;
-  int64_t fs2 = (int64_t)round(Frontend.samprate / 2.0);
-  if (span >= (fs2 * 2)) {
-    /* span covers full range; center must be clamped to middle */
-    center_freq = fs2;
+  /* Same fix as check_frequency(): valid range is [lo+lo_if, lo+hi_if]
+     around the front end's real tuned centre (Frontend.frequency), not
+     [0, fs2] - see frontend_if_bounds() above. This function is reached
+     from the "Z:c:" zoom-center command and was independently reproducing
+     the exact same zero-based bug - confirmed by it recomputing 795000
+     from our real values (fs2 - half with lo=0). */
+  int64_t lo = (int64_t)round(Frontend.frequency);
+  double lo_if, hi_if;
+  frontend_if_bounds(&lo_if, &hi_if);
+  int64_t const lo_bound = lo + (int64_t)round(lo_if);
+  int64_t const hi_bound = lo + (int64_t)round(hi_if);
+  if (span >= (hi_bound - lo_bound)) {
+    /* span covers full range; center must be clamped to the middle */
+    center_freq = (lo_bound + hi_bound) / 2;
   } else {
     int64_t half = span / 2;
-    if (center_freq - half < 0) {
-      center_freq = half;
-    } else if (center_freq + half > fs2) {
-      center_freq = fs2 - half;
+    if (center_freq - half < lo_bound) {
+      center_freq = lo_bound + half;
+    } else if (center_freq + half > hi_bound) {
+      center_freq = hi_bound - half;
     }
   }
   sp->center_frequency = (uint32_t)center_freq;
@@ -3921,6 +3993,30 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   }
   /* Include frontend/channel metadata so client status fields remain current when spectrum is paused */
   encode_int32(&bp, INPUT_SAMPRATE, (uint32_t)round(fabs(Frontend.samprate)));
+  /* Real-sampling front ends (Airspy, RX888) have a valid IF window that is
+     NOT symmetric around Frontend.frequency like a complex/IQ front end's is
+     - confirmed in src/airspy.c: max_IF = -600000, min_IF = -0.47*samprate,
+     both negative, i.e. the usable window sits entirely BELOW the tuned
+     frequency. Frontend.isreal/min_IF/max_IF are already decoded server-side
+     via decode_radio_status() (FE_ISREAL/FE_LOW_EDGE/FE_HIGH_EDGE) but were
+     never forwarded to the browser - the client had no way to know the
+     front end was asymmetric at all, and silently assumed the complex/IQ
+     case (symmetric +/- samprate/2) always. Encoded BEFORE
+     FIRST_LO_FREQUENCY deliberately: that field's one-shot retune-validity
+     check needs these already parsed, same reasoning as input_samprate
+     above. */
+  encode_bool(&bp, FE_ISREAL, Frontend.isreal);
+  encode_float(&bp, FE_LOW_EDGE, Frontend.min_IF);
+  encode_float(&bp, FE_HIGH_EDGE, Frontend.max_IF);
+  /* Front end's real tuned RF centre (first LO frequency) - already decoded server-side
+     into Frontend.frequency via FIRST_LO_FREQUENCY (decode_status.c), but never forwarded
+     to the browser before. Without it, the client has no way to know a tuner-based front
+     end (RTL-SDR, Airspy) isn't centred at 0 Hz like direct-sampling HF receivers are.
+     Encoded AFTER input_samprate/FE_ISREAL/FE_LOW_EDGE/FE_HIGH_EDGE deliberately: the
+     client applies a one-shot retune correction as soon as this field arrives, and
+     needs all of those already parsed from earlier in this same packet for that
+     check to be meaningful. */
+  encode_double(&bp, FIRST_LO_FREQUENCY, Frontend.frequency);
   encode_int64(&bp, INPUT_SAMPLES, (uint64_t)Frontend.samples);
   encode_int64(&bp, GPS_TIME, (uint64_t)Channel.clocktime);
   encode_float(&bp, IF_POWER, power2dB(Frontend.if_power));

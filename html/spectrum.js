@@ -38,6 +38,30 @@ function Spectrum(id, options) {
     // Handle options
     this.startMinHoldTimestamp = Date.now() + 2000; // wait 2 seconds before grabbing real min values
     this.centerHz = (options && options.centerHz) ? options.centerHz : 0;
+    // Front end's real tuned RF centre (first LO), e.g. 145000000 for a 2m RTL-SDR.
+    // 0 means "unknown yet" or "direct-sampling HF receiver, effectively 0" - both
+    // degrade safely to the old zero-based behaviour in checkFrequencyIsValid/
+    // setCenterHz/setSpanHz below. Set from the FIRST_LO_FREQUENCY status field.
+    this.frontendFrequencyHz = 0;
+    // Front end's real valid IF window, relative to frontendFrequencyHz -
+    // e.g. Airspy real-sampling: minIF=-9,400,000, maxIF=-600,000 (entirely
+    // below the tuned frequency); RTL-SDR complex/IQ: roughly symmetric
+    // +/-0.47*samprate. NaN means "not received yet" - degrades safely to
+    // the old +/- samprate/2 symmetric assumption in checkFrequencyIsValid/
+    // setCenterHz/setSpanHz below. Set from FE_LOW_EDGE/FE_HIGH_EDGE.
+    this.minIF = NaN;
+    this.maxIF = NaN;
+    // True if the front end uses real (not complex/IQ) sampling. Currently
+    // only informational here - the actual bound math below uses
+    // minIF/maxIF directly, which are meaningful for either kind of front
+    // end. Set from FE_ISREAL.
+    this.isReal = false;
+    // Cosmetic only: interpolate over the front end's own DC/centre-bin
+    // spike in the drawn spectrum/waterfall (a near-universal ADC-DC-bias
+    // artifact at 0 Hz baseband, unrelated to any real received signal -
+    // see docs/INVENTORY.md). Never touches bin_copy/exported data, only
+    // what gets drawn. Toggle: "Hide DC Spike" in the options dialog.
+    this.hideDcSpike = true;
     this.spanHz = (options && options.spanHz) ? options.spanHz : 0;
     this.wf_size = (options && options.wf_size) ? options.wf_size : 0;
     this.wf_rows = (options && options.wf_rows) ? options.wf_rows : 256;
@@ -249,7 +273,14 @@ function Spectrum(id, options) {
             console.warn("input_samprate is not set on spectrum object.");
             return false;
         }
-        const validFrequency = frequencyRequested >= 0 && frequencyRequested <= this.input_samprate / 2;
+        // lo=0 (unknown, or a true direct-sampling HF receiver) degrades to the
+        // original zero-based check. ifBounds is [lo+minIF, lo+maxIF] - the real,
+        // possibly-asymmetric valid IF window (see getIfBounds() below) - not a
+        // flat +/- samprate/2 assumption, which is only correct for a complex/IQ
+        // front end whose window happens to be (close to) symmetric.
+        const lo = (typeof this.frontendFrequencyHz === 'number' && this.frontendFrequencyHz > 0) ? this.frontendFrequencyHz : 0;
+        const ifBounds = this.getIfBounds();
+        const validFrequency = frequencyRequested >= (lo + ifBounds.lo) && frequencyRequested <= (lo + ifBounds.hi);
         if (!validFrequency) {
             console.warn("Requested frequency is out of range: " + frequencyRequested);
         }
@@ -950,6 +981,15 @@ Spectrum.prototype.drawSpectrum = function(bins) {
         }
     }
 
+    // Re-interpolate here too, after averaging/max-hold/min-hold have
+    // picked whichever array `bins` now points to: this.binsMax in
+    // particular never decays (decay=1 means true infinite hold), so a
+    // single noisy frame at the DC bin gets latched there permanently -
+    // the earlier interpolateDcSpike() call in drawSpectrumWaterfall
+    // (on the fresh incoming data, before it feeds any of that history)
+    // isn't enough on its own to keep the actually-drawn trace clean.
+    bins = this.interpolateDcSpike(bins);
+
     // Do not draw anything if spectrum is not visible
     if (this.ctx_axes.canvas.height < 1) {
         console.log('Spectrum.drawSpectrum: axes canvas height < 1, skipping draw');
@@ -1370,6 +1410,34 @@ Spectrum.prototype.addData = function(data) {
 }
 
 /**
+ * Cosmetically interpolates over the front end's own DC/centre-bin spike
+ * (see this.hideDcSpike above) for display purposes only. Returns the
+ * original array unchanged (no copy) whenever the feature is off, the
+ * front end frequency isn't known yet, or the window would run off either
+ * end of the data - so callers never need to null-check the result.
+ */
+Spectrum.prototype.interpolateDcSpike = function(data) {
+    if (!this.hideDcSpike) return data;
+    if (!(typeof this.frontendFrequencyHz === 'number' && this.frontendFrequencyHz > 0)) return data;
+    if (!data || !data.length) return data;
+    const dcBin = this.hz_to_bin(this.frontendFrequencyHz);
+    const halfWidth = 2; // interpolate dcBin-2 .. dcBin+2 (a few bins wide)
+    const lo = dcBin - halfWidth;
+    const hi = dcBin + halfWidth;
+    // Need one real anchor bin just outside the window on each side
+    if (lo - 1 < 0 || hi + 1 >= data.length) return data;
+    const leftVal = data[lo - 1];
+    const rightVal = data[hi + 1];
+    if (!Number.isFinite(leftVal) || !Number.isFinite(rightVal)) return data;
+    const out = data.slice();
+    const span = (hi + 1) - (lo - 1);
+    for (let i = lo; i <= hi; i++) {
+        out[i] = leftVal + (rightVal - leftVal) * ((i - (lo - 1)) / span);
+    }
+    return out;
+};
+
+/**
  * Renders the spectrum and waterfall displays using the provided FFT bin data.
  *
  * @function
@@ -1384,13 +1452,19 @@ Spectrum.prototype.addData = function(data) {
  * - Calls `resize` to ensure the display is properly sized.
  * The function applies optional biases to the spectrum and waterfall ranges for optimal visual presentation.
  */
-Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax, force) 
+Spectrum.prototype.drawSpectrumWaterfall = function(data,getNewMinMax, force)
 {
     // If a suppression window is active (user-initiated change), skip
     // remote-driven draws unless `force` is true.
     try {
         if (!force && this._suppressRemoteDrawUntil && Date.now() < this._suppressRemoteDrawUntil) return;
     } catch (e) {}
+        // Cosmetic-only substitution: this.bin_copy (set by the caller before
+        // drawSpectrumWaterfall is invoked, used for CSV export etc.) still
+        // points at the real, untouched data - only what actually gets drawn
+        // (and the autoscale range measureMinMax computes below) uses the
+        // DC-spike-interpolated copy.
+        data = this.interpolateDcSpike(data);
         const useN0 = false;
         const rangeBias = -5;       // Bias the spectrum and waterfall range by this amount 
         if(getNewMinMax){
@@ -1670,18 +1744,23 @@ Spectrum.prototype.rangeDecrease = function() {
 Spectrum.prototype.setCenterHz = function(hz) {
     // Ensure span/center do not exceed hardware limits when input_samprate is known
     if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
-        const nyquist = this.input_samprate / 2;
+        const lo = (typeof this.frontendFrequencyHz === 'number' && this.frontendFrequencyHz > 0) ? this.frontendFrequencyHz : 0;
+        const ifBounds = this.getIfBounds();
+        const windowWidth = ifBounds.hi - ifBounds.lo;
         let halfSpan = Math.max(0, this.spanHz / 2);
-        // If requested span is larger than the available sample bandwidth, clamp span
-        if (halfSpan > nyquist) {
-            halfSpan = nyquist;
-            this.spanHz = 2 * nyquist;
+        // If requested span is larger than the available window, clamp span
+        if (halfSpan * 2 > windowWidth) {
+            halfSpan = windowWidth / 2;
+            this.spanHz = windowWidth;
         }
-        const minCenter = halfSpan;
-        const maxCenter = nyquist - halfSpan;
+        // Valid centre range is [lo+ifBounds.lo, lo+ifBounds.hi] around the front
+        // end's real tuned frequency (lo), not a flat +/- nyquist - lo=0/no real
+        // bounds yet degrades to the old symmetric behaviour (see getIfBounds()).
+        const minCenter = lo + ifBounds.lo + halfSpan;
+        const maxCenter = lo + ifBounds.hi - halfSpan;
         if (minCenter > maxCenter) {
-            // Degenerate case: force center to mid-Nyquist
-            hz = nyquist / 2;
+            // Degenerate case: force center to the middle of the window
+            hz = lo + (ifBounds.lo + ifBounds.hi) / 2;
         } else {
             if (hz < minCenter) hz = minCenter;
             if (hz > maxCenter) hz = maxCenter;
@@ -1701,23 +1780,27 @@ Spectrum.prototype.setSpanHz = function(hz) {
     const prevEnd = this.centerHz + (prevSpan / 2);
     const wasVisible = (typeof this.frequency === 'number') && (this.frequency >= prevStart && this.frequency <= prevEnd);
 
-    // Clamp span to available sample rate if known, and adjust center if needed
+    // Clamp span to the available window if known, and adjust center if needed
     if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
-        const maxSpan = this.input_samprate; // cannot exceed sample rate
+        const ifBoundsForSpan = this.getIfBounds();
+        const maxSpan = ifBoundsForSpan.hi - ifBoundsForSpan.lo; // cannot exceed the real IF window width
         if (hz > maxSpan) hz = maxSpan;
         if (hz < 0) hz = 0;
     }
     this.spanHz = hz;
     // After changing span, ensure current center still yields min/max within limits
     if (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) {
-        const nyquist = this.input_samprate / 2;
+        const lo = (typeof this.frontendFrequencyHz === 'number' && this.frontendFrequencyHz > 0) ? this.frontendFrequencyHz : 0;
+        const ifBounds = this.getIfBounds();
+        const windowWidth = ifBounds.hi - ifBounds.lo;
         let halfSpan = Math.max(0, this.spanHz / 2);
-        if (halfSpan > nyquist) {
-            halfSpan = nyquist;
-            this.spanHz = 2 * nyquist;
+        if (halfSpan * 2 > windowWidth) {
+            halfSpan = windowWidth / 2;
+            this.spanHz = windowWidth;
         }
-        const minCenter = halfSpan;
-        const maxCenter = nyquist - halfSpan;
+        // Same lo-centred range as setCenterHz - see comment there.
+        const minCenter = lo + ifBounds.lo + halfSpan;
+        const maxCenter = lo + ifBounds.hi - halfSpan;
         if (this.centerHz < minCenter) this.centerHz = minCenter;
         if (this.centerHz > maxCenter) this.centerHz = maxCenter;
     }
@@ -1938,6 +2021,24 @@ Spectrum.prototype.bin_to_hz = function(bin) {
     var start_freq = this.centerHz - (this.spanHz / 2.0);
     return start_freq + ((this.spanHz / this.bins) * bin);
 }
+
+/**
+ * Effective valid IF window, relative to frontendFrequencyHz - i.e. the
+ * true receivable RF range is [frontendFrequencyHz + lo, frontendFrequencyHz
+ * + hi]. Mirrors frontend_if_bounds() server-side (ka9q-web.c): uses the
+ * real minIF/maxIF (from FE_LOW_EDGE/FE_HIGH_EDGE) when known, which are
+ * meaningful for either a complex/IQ front end (symmetric) or a
+ * real-sampling one (asymmetric, entirely negative - see spectrum.js
+ * constructor comment). Falls back to the old +/- samprate/2 symmetric
+ * assumption only if those haven't arrived yet.
+ */
+Spectrum.prototype.getIfBounds = function() {
+    if (Number.isFinite(this.minIF) && Number.isFinite(this.maxIF) && this.maxIF > this.minIF) {
+        return { lo: this.minIF, hi: this.maxIF };
+    }
+    const fs2 = (typeof this.input_samprate === 'number' && !isNaN(this.input_samprate)) ? this.input_samprate / 2 : 0;
+    return { lo: -fs2, hi: fs2 };
+};
 
 Spectrum.prototype.hz_to_bin = function(hz) {
     var start_freq = this.centerHz - (this.spanHz / 2.0);
