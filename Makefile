@@ -49,7 +49,10 @@ config_paths.h: Makefile
 
 install: ka9q-web
 	install -m 755 $^ $(PREFIX)/sbin
-	install -m 644 -D html/* -t $(RESOURCES_BASE_DIR)/html/
+	mkdir -p $(RESOURCES_BASE_DIR)/html
+	cp -r html/. $(RESOURCES_BASE_DIR)/html/
+	find $(RESOURCES_BASE_DIR)/html -type d -exec chmod 755 {} +
+	find $(RESOURCES_BASE_DIR)/html -type f -exec chmod 644 {} +
 
 install-config:
 	install -b -m 644 config/* /etc/radio
