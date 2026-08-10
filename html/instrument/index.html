@@ -4,7 +4,37 @@
 <meta charset="utf-8">
 <title>ka9q-web instrument</title>
 <style>
-  body { background: #111; color: #ddd; font-family: sans-serif; padding: 2rem; max-width: 40rem; }
+  /* "The receiver fills the screen... nothing floats over them" +
+     "One control block, docked below the display... its height is its
+     own; the display takes what remains." (design brief section 4) */
+  html, body { height: 100%; margin: 0; }
+  body { display: flex; flex-direction: column; background: #111; color: #ddd; font-family: sans-serif; overflow: hidden; }
+
+  #display-area {
+    flex: 1 1 auto;
+    min-height: 0;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #555;
+    font-size: 0.9rem;
+  }
+
+  #control-block {
+    flex: 0 0 auto;
+    background: #111;
+    border-top: 1px solid #333;
+    padding: 1rem 2rem;
+    max-width: 44rem;
+    width: 100%;
+    margin: 0 auto;
+    box-sizing: border-box;
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+
+  h1 { font-size: 1.1rem; margin: 0 0 0.5rem; }
   dl { display: grid; grid-template-columns: 10rem 1fr; gap: 0.4rem 1rem; margin: 1rem 0; }
   dt { color: #888; }
   dd { margin: 0; }
@@ -60,40 +90,45 @@
 </style>
 </head>
 <body>
-<h1>ka9q-web instrument</h1>
-<p id="status-line">Connection: <span id="conn-state">connecting…</span></p>
 
-<dl>
-  <dt>Front end</dt><dd id="fe-desc">—</dd>
-  <dt>Coverage</dt><dd id="fe-coverage">—</dd>
-  <dt>Signal (IF power) <span id="meter-settings" class="value-anchor" title="Meter style">⚙</span></dt><dd id="fe-power">—</dd>
-  <dt>Tuned frequency</dt><dd id="tuned-freq">—</dd>
-  <dt>Mode</dt><dd id="tuned-mode">—</dd>
-</dl>
+<div id="display-area">Spectrum/waterfall display - not built yet</div>
 
-<div id="vfo-digits" class="vfo-digits"></div>
-<p class="vfo-hint">Click the upper half of a digit to raise it, the lower half to lower it (Hz).</p>
+<div id="control-block">
+  <h1>ka9q-web instrument</h1>
+  <p id="status-line">Connection: <span id="conn-state">connecting…</span></p>
 
-<p>
-  Step: <button type="button" id="step-down">▼</button>
-  <span id="step-value" class="value-anchor">1 kHz</span>
-  <button type="button" id="step-up">▲</button>
-</p>
+  <dl>
+    <dt>Front end</dt><dd id="fe-desc">—</dd>
+    <dt>Coverage</dt><dd id="fe-coverage">—</dd>
+    <dt>Signal (IF power) <span id="meter-settings" class="value-anchor" title="Meter style">⚙</span></dt><dd id="fe-power">—</dd>
+    <dt>Tuned frequency</dt><dd id="tuned-freq">—</dd>
+    <dt>Mode</dt><dd id="tuned-mode">—</dd>
+  </dl>
 
-<form id="tune-form">
-  <label>Or type an exact frequency (kHz): <input id="tune-input" type="text" inputmode="decimal" size="12"></label>
-  <button type="submit">Tune</button>
-</form>
+  <div id="vfo-digits" class="vfo-digits"></div>
+  <p class="vfo-hint">Click the upper half of a digit to raise it, the lower half to lower it (Hz).</p>
 
-<div class="chips" id="band-chips"></div>
+  <p>
+    Step: <button type="button" id="step-down">▼</button>
+    <span id="step-value" class="value-anchor">1 kHz</span>
+    <button type="button" id="step-up">▲</button>
+  </p>
 
-<h2>Memories</h2>
-<div class="chips" id="memory-chips"></div>
-<button type="button" id="memory-save">Save current frequency</button>
+  <form id="tune-form">
+    <label>Or type an exact frequency (kHz): <input id="tune-input" type="text" inputmode="decimal" size="12"></label>
+    <button type="submit">Tune</button>
+  </form>
 
-<div id="switcher" hidden>
-  <h2>Other receivers on this station</h2>
-  <ul id="switcher-list"></ul>
+  <div class="chips" id="band-chips"></div>
+
+  <h2>Memories</h2>
+  <div class="chips" id="memory-chips"></div>
+  <button type="button" id="memory-save">Save current frequency</button>
+
+  <div id="switcher" hidden>
+    <h2>Other receivers on this station</h2>
+    <ul id="switcher-list"></ul>
+  </div>
 </div>
 
 <script type="module" src="app.js"></script>
