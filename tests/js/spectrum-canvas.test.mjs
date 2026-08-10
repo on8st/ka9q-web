@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dbToColor, binIndexForPixel, hzForPixel } from "../../html/instrument/spectrum-canvas.js";
+import { dbToColor, binIndexForPixel, hzForPixel, pixelForHz } from "../../html/instrument/spectrum-canvas.js";
 
 test("dbToColor clamps to the first/last heatmap stops at the range ends", () => {
   assert.deepEqual(dbToColor(-100, -100, -20), [0, 0, 0]);
@@ -52,4 +52,17 @@ test("hzForPixel: left/right edges match the span's start/end", () => {
   const spanHz = binWidthHz * binCount;
   assert.equal(hzForPixel(0, width, absCenterHz, binWidthHz, binCount), absCenterHz - spanHz / 2);
   assert.equal(hzForPixel(width, width, absCenterHz, binWidthHz, binCount), absCenterHz + spanHz / 2);
+});
+
+test("pixelForHz is the inverse of hzForPixel within the displayed span", () => {
+  const width = 1000, absCenterHz = 145_500_000, binWidthHz = 500, binCount = 1620;
+  const hz = hzForPixel(700, width, absCenterHz, binWidthHz, binCount);
+  const x = pixelForHz(hz, width, absCenterHz, binWidthHz, binCount);
+  assert.ok(Math.abs(x - 700) < 1);
+});
+
+test("pixelForHz returns null for a frequency outside the displayed span", () => {
+  const width = 1000, absCenterHz = 145_500_000, binWidthHz = 500, binCount = 1620;
+  assert.equal(pixelForHz(absCenterHz + binWidthHz * binCount, width, absCenterHz, binWidthHz, binCount), null);
+  assert.equal(pixelForHz(0, width, absCenterHz, binWidthHz, binCount), null);
 });

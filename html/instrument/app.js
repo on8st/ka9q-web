@@ -1,12 +1,13 @@
-// Live status + tuning for this instrument-UI instance. Still minimal:
-// proves the real data pipeline and the brief's "tuning happens on the
-// digits" behaviour end-to-end, before richer interaction (per-value
-// panels, spectrum/waterfall display) gets built on top of it.
+// Wiring for the instrument UI. Visual structure and interaction pattern
+// (segment + anchored popover, single scope canvas, slide-in drawer)
+// follow the approved design mockup - see INSTRUMENT-DECISIONS.md for
+// what's deliberately NOT wired here (features tests/check-parity.mjs
+// still marks instrumentId: null) rather than shown as inert controls.
 import { Ka9qWebClient } from "./ws-client.js";
 import { createDigitDisplay } from "./freq-digits.js";
 import { createValuePanel } from "./value-panel.js";
 import { STEP_OPTIONS_HZ, applyStep, fmtStep } from "./tune-step.js";
-import { bandsInCoverage } from "./band-options.js";
+import { bandsInCoverage, BAND_OPTIONS } from "./band-options.js";
 import { loadMemories, addMemory, deleteMemory } from "./memories.js";
 import { createMeter } from "./meter.js";
 import { createSpectrumDisplay } from "./spectrum-canvas.js";
@@ -18,9 +19,8 @@ const $ = (id) => document.getElementById(id);
 let currentFreqHz = null;
 let stepHz = 1000;
 let frontendFrequencyHz = 0; // FIRST_LO_FREQUENCY, needed to make spectrum's baseband-relative centerHz absolute (PROTOCOL-SPECTRUM.md)
+let currentCoverage = { lowHz: 0, highHz: 0 };
 
-// Confirmed against the stock UI's own mode <select> (html/radio.html) -
-// wusb/wlsb are commented out there too, so left out here as well.
 const MODES = ["cwu", "cwl", "usb", "lsb", "am", "sam", "fm", "iq", "isb", "user1", "user2", "user3"];
 
 function fmtMHz(hz) {
@@ -32,162 +32,51 @@ const client = new Ka9qWebClient(
   (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/",
 ).connect();
 
-// "Tuning happens on the digits": clicking a digit's upper/lower half
-// steps that place value and sends a real tune command immediately.
-// Deliberately doesn't optimistically update its own display - it waits
-// for the server's own tunedFreq echo, same "server state is
-// authoritative" posture ka9q-web.c itself takes (see PROTOCOL-TEXT.md).
-// A genuine change always triggers that echo; only a no-op step wouldn't,
-// and a no-op step needs no visual update anyway.
-const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => client.tune(newHz));
-
-// "The receiver fills the screen. Spectrum and waterfall take all
-// available height." Absolute frequency axis needs the front end's real
-// tuned centre added to the packet's baseband-relative centerHz - the
-// same correction this fork's frequency-offset fix already applies to
-// tuned-frequency display (PROTOCOL-SPECTRUM.md).
+// ---- Spectrum/waterfall: fills #display-area, per "the receiver fills
+// the screen" (brief section 4). ----
 const spectrumDisplay = createSpectrumDisplay($("display-area"));
-let lastAbsSpectrum = null;
 client.addEventListener("spectrum", (e) => {
   const abs = absoluteCenterHz(e.detail, frontendFrequencyHz);
-  lastAbsSpectrum = { ...e.detail, centerHz: abs };
-  spectrumDisplay.render(lastAbsSpectrum);
+  spectrumDisplay.render({ ...e.detail, centerHz: abs });
 });
 
-// "Display settings belong to the display... the operator points at what
-// they want to change." (brief section 4) - dB floor/ceiling, reached by
-// clicking the display itself, not a readout value.
-createValuePanel($("display-area"), (panel, close) => {
-  const { minDb, maxDb } = spectrumDisplay.getRange();
-  panel.innerHTML = `
-    <label>Floor (dB): <input type="text" id="db-floor" value="${minDb}" size="4"></label>
-    <label>Ceiling (dB): <input type="text" id="db-ceiling" value="${maxDb}" size="4"></label>
-    <button type="button" id="db-apply">Apply</button>`;
-  panel.querySelector("#db-apply").addEventListener("click", () => {
-    const floor = parseFloat(panel.querySelector("#db-floor").value);
-    const ceiling = parseFloat(panel.querySelector("#db-ceiling").value);
-    if (Number.isFinite(floor) && Number.isFinite(ceiling) && ceiling > floor) {
-      spectrumDisplay.setRange(floor, ceiling);
-    }
-    close();
-  });
-});
+client.addEventListener("open", () => {});
+client.addEventListener("close", () => {});
 
-// "Rare things live in one panel... out of the way and one action from
-// anywhere." Telemetry, a pause toggle, CSV export, and notes.
-createValuePanel($("rare-things"), (panel, close) => {
-  const s = spectrumDisplay.getLastSpectrum();
-  panel.className = "value-panel rare-panel";
-  panel.innerHTML = `
-    <h3>Telemetry</h3>
-    <dl>
-      <dt>Sample rate</dt><dd>${s ? (s.inputSamprate / 1e6).toFixed(3) + " Msps" : "—"}</dd>
-      <dt>Noise bandwidth</dt><dd>${s ? s.noiseBwHz.toFixed(1) + " Hz" : "—"}</dd>
-      <dt>RF gain / atten</dt><dd>${s ? `${s.rfGainDb.toFixed(1)} / ${s.rfAttenDb.toFixed(1)} dB` : "—"}</dd>
-      <dt>A/D overflows</dt><dd>${s ? s.adOver : "—"}</dd>
-    </dl>
-    <h3>Behaviour</h3>
-    <label><input type="checkbox" id="pause-toggle" ${spectrumDisplay.isPaused() ? "checked" : ""}> Pause display updates</label>
-    <h3>Export</h3>
-    <button type="button" id="export-csv" ${s ? "" : "disabled"}>Download current spectrum (CSV)</button>
-    <h3>Notes</h3>
-    <textarea id="notes-text" rows="3" cols="30">${loadNotes()}</textarea>`;
-  panel.querySelector("#pause-toggle").addEventListener("change", (e) => spectrumDisplay.setPaused(e.target.checked));
-  panel.querySelector("#export-csv").addEventListener("click", () => {
-    const current = spectrumDisplay.getLastSpectrum();
-    if (!current) return;
-    const blob = new Blob([spectrumToCsv(current, current.centerHz)], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "spectrum.csv";
-    a.click();
-    URL.revokeObjectURL(a.href);
-  });
-  panel.querySelector("#notes-text").addEventListener("input", (e) => saveNotes(e.target.value));
-});
-
-client.addEventListener("open", () => { $("conn-state").textContent = "connected"; });
-client.addEventListener("close", () => { $("conn-state").textContent = "disconnected"; });
-
+// ---- Meter segment ----
 const meter = createMeter($("fe-power"));
+createValuePanel($("sgm-meter"), (panel, close) => {
+  panel.innerHTML = `
+    <div class="pop-head"><span>Meter</span><span>reads signal</span></div>
+    <div class="pop-body">
+      <label class="chk"><input type="checkbox" id="ck-analog" ${meter.getStyle() === "analog" ? "checked" : ""}> Analog meter in the readout</label>
+    </div>`;
+  panel.querySelector("#ck-analog").addEventListener("change", (e) => {
+    meter.setStyle(e.target.checked ? "analog" : "bar");
+  });
+});
 
+// ---- Frontend telemetry -> ident badge, coverage, meter, band chips ----
 client.addEventListener("frontend", (e) => {
   const fe = e.detail;
   frontendFrequencyHz = fe.frequencyHz || 0;
-  $("fe-desc").textContent = fe.descriptionText || "(unknown front end)";
-  const lowHz = fe.frequencyHz + (fe.ifLowHz ?? 0);
-  const highHz = fe.frequencyHz + (fe.ifHighHz ?? 0);
-  $("fe-coverage").textContent = `${fmtMHz(lowHz)}–${fmtMHz(highHz)} MHz`;
+  $("ident-fe").textContent = "· " + (fe.descriptionText || "unknown front end");
+  currentCoverage = { lowHz: fe.frequencyHz + (fe.ifLowHz ?? 0), highHz: fe.frequencyHz + (fe.ifHighHz ?? 0) };
   meter.render(fe.ifPowerDb);
   updateSelfEntry(fe);
-  renderBandChips(lowHz, highHz);
+  renderBandCategories();
 });
 
-// "A settings panel holds the choice, never a second meter."
-createValuePanel($("meter-settings"), (panel, close) => {
-  panel.innerHTML = `<button type="button" data-style="bar">Bar</button><button type="button" data-style="analog">Analog</button>`;
-  panel.addEventListener("click", (e) => {
-    const style = e.target.dataset.style;
-    if (!style) return;
-    meter.setStyle(style);
-    close();
-  });
-});
-
-// Band quick-select: only bands this receiver can actually reach (see
-// band-options.js - not a stock behaviour, a deliberate adaptation since
-// each instrument covers one slice of spectrum, unlike the stock all-in-
-// one UI). Re-rendered whenever coverage is known (every "frontend" event).
-function renderBandChips(lowHz, highHz) {
-  const bands = bandsInCoverage("amateur", lowHz, highHz);
-  $("band-chips").innerHTML = bands
-    .map((b) => `<button type="button" data-freq="${b.freq}">${b.label}</button>`)
-    .join("");
-}
-$("band-chips").addEventListener("click", (e) => {
-  const freq = e.target.dataset.freq;
-  if (freq) client.tune(Number(freq));
-});
-
-// ---- Memories: save/recall, not the stock UI's full 50-slot system (see
-// memories.js) - functional intent, not a port. ----
-let memories = loadMemories();
-
-function renderMemories() {
-  $("memory-chips").innerHTML = memories.map((m, i) => `
-    <span class="memory-chip">
-      <button type="button" data-recall="${i}">${m.label}</button>
-      <button type="button" data-delete="${i}" title="Delete" class="memory-delete">×</button>
-    </span>`).join("");
-}
-renderMemories();
-
-$("memory-chips").addEventListener("click", (e) => {
-  const recallIdx = e.target.dataset.recall;
-  const deleteIdx = e.target.dataset.delete;
-  if (recallIdx !== undefined) {
-    client.tune(memories[Number(recallIdx)].freqHz);
-  } else if (deleteIdx !== undefined) {
-    memories = deleteMemory(memories, Number(deleteIdx));
-    renderMemories();
-  }
-});
-
-$("memory-save").addEventListener("click", () => {
-  if (currentFreqHz === null) return;
-  memories = addMemory(memories, currentFreqHz);
-  renderMemories();
-});
+// ---- Frequency digits + step spinner ----
+const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => client.tune(newHz));
 
 client.addEventListener("tunedFreq", (e) => {
   const { hz } = e.detail;
   currentFreqHz = hz;
-  $("tuned-freq").textContent = `${fmtMHz(hz)} MHz`;
-  $("tune-input").value = (hz / 1000).toFixed(3);
   digitDisplay.render(hz);
+  spectrumDisplay.setTunedFreqHz(hz);
 });
 
-// "The step is visible, not hidden... tuning by the amount shown."
 $("step-value").textContent = fmtStep(stepHz);
 $("step-up").addEventListener("click", () => {
   if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, stepHz, 1));
@@ -195,9 +84,12 @@ $("step-up").addEventListener("click", () => {
 $("step-down").addEventListener("click", () => {
   if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, stepHz, -1));
 });
-// "Choosing a different step happens on the step itself."
 createValuePanel($("step-value"), (panel, close) => {
-  panel.innerHTML = STEP_OPTIONS_HZ.map((s) => `<button type="button" data-step="${s}">${fmtStep(s)}</button>`).join("");
+  panel.innerHTML = `
+    <div class="pop-head"><span>Tuning step</span><span></span></div>
+    <div class="pop-body">
+      <div class="chips g4">${STEP_OPTIONS_HZ.map((s) => `<span class="chip${s === stepHz ? " on" : ""}" data-step="${s}">${fmtStep(s)}</span>`).join("")}</div>
+    </div>`;
   panel.addEventListener("click", (e) => {
     const s = e.target.dataset.step;
     if (!s) return;
@@ -207,20 +99,13 @@ createValuePanel($("step-value"), (panel, close) => {
   });
 });
 
-client.addEventListener("mode", (e) => {
-  $("tuned-mode").textContent = e.detail.mode;
-});
-
-// "The readout is the control surface": clicking the mode value opens its
-// own picker anchored to it. Mode-setting has no reliable success echo
-// (see PROTOCOL-TEXT.md "Mode confirmation is asymmetric with frequency
-// confirmation") - ACK is the only confirmation a command reached the
-// server at all, so this updates its own display optimistically on
-// selection rather than waiting for a "mode" event that a clean success
-// will never produce. A genuine M_FORCE (drift correction) still updates
-// it authoritatively via the listener above.
-createValuePanel($("tuned-mode"), (panel, close) => {
-  panel.innerHTML = MODES.map((m) => `<button type="button" data-mode="${m}">${m.toUpperCase()}</button>`).join("");
+// ---- Mode segment ----
+createValuePanel($("sgm-mode"), (panel, close) => {
+  panel.innerHTML = `
+    <div class="pop-head"><span>Mode</span><span></span></div>
+    <div class="pop-body">
+      <div class="chips g4">${MODES.map((m) => `<span class="chip${m === client.mode ? " on" : ""}" data-mode="${m}">${m.toUpperCase()}</span>`).join("")}</div>
+    </div>`;
   panel.addEventListener("click", (e) => {
     const mode = e.target.dataset.mode;
     if (!mode) return;
@@ -229,51 +114,166 @@ createValuePanel($("tuned-mode"), (panel, close) => {
     close();
   });
 });
+client.addEventListener("mode", (e) => { $("tuned-mode").textContent = e.detail.mode; });
 
-client.addEventListener("busy", (e) => {
-  $("status-line").textContent = `Server busy: ${e.detail.reason}`;
+// ---- Band segment: category tabs + chips filtered to this receiver's
+// real coverage (deliberate adaptation - see band-options.js). ----
+let bandCategory = "amateur";
+
+function renderBandCategories() {
+  const cats = Object.keys(BAND_OPTIONS).filter((c) => bandsInCoverage(c, currentCoverage.lowHz, currentCoverage.highHz).length > 0);
+  if (!cats.includes(bandCategory)) bandCategory = cats[0] || "amateur";
+}
+renderBandCategories();
+
+createValuePanel($("sgm-band"), (panel, close) => {
+  const cats = Object.keys(BAND_OPTIONS).filter((c) => bandsInCoverage(c, currentCoverage.lowHz, currentCoverage.highHz).length > 0);
+  const bands = bandsInCoverage(bandCategory, currentCoverage.lowHz, currentCoverage.highHz);
+  panel.innerHTML = `
+    <div class="pop-head"><span>Band</span><span>coverage ${fmtMHz(currentCoverage.lowHz)}–${fmtMHz(currentCoverage.highHz)} MHz</span></div>
+    <div class="pop-body">
+      <div class="chips" id="band-cats">${cats.map((c) => `<span class="chip${c === bandCategory ? " on" : ""}" data-cat="${c}">${c}</span>`).join("")}</div>
+      <div class="chips g4" id="band-chips">${bands.map((b) => `<span class="chip" data-freq="${b.freq}">${b.label}</span>`).join("")}</div>
+    </div>`;
+  panel.querySelector("#band-cats").addEventListener("click", (e) => {
+    const cat = e.target.dataset.cat;
+    if (!cat) return;
+    bandCategory = cat;
+    close();
+    $("sgm-band").click();
+  });
+  panel.querySelector("#band-chips").addEventListener("click", (e) => {
+    const freq = e.target.dataset.freq;
+    if (!freq) return;
+    $("v-band").textContent = e.target.textContent;
+    client.tune(Number(freq));
+    close();
+  });
 });
 
-$("tune-form").addEventListener("submit", (e) => {
-  e.preventDefault();
-  const khz = parseFloat($("tune-input").value);
-  if (Number.isFinite(khz)) client.tune(khz * 1000);
+// ---- Memory segment ----
+let memories = loadMemories();
+$("v-mem").textContent = String(memories.length);
+
+createValuePanel($("sgm-mem"), (panel, close) => {
+  panel.innerHTML = `
+    <div class="pop-head"><span>Channel memories</span><span>${memories.length}</span></div>
+    <div class="pop-body">
+      <div class="memlist" id="mem-list">${memories.map((m, i) => `
+        <div class="mem" data-recall="${i}"><span class="n">${i + 1}</span><span><span class="f">${fmtMHz(m.freqHz)}</span> <span class="m">${m.label}</span></span><span class="m" data-delete="${i}">✕</span></div>
+      `).join("")}</div>
+      <div class="prow"><button class="k mini" id="mem-save">Save current frequency</button></div>
+    </div>`;
+  panel.querySelector("#mem-list").addEventListener("click", (e) => {
+    const recall = e.target.closest("[data-recall]");
+    const del = e.target.dataset.delete;
+    if (del !== undefined) {
+      memories = deleteMemory(memories, Number(del));
+      $("v-mem").textContent = String(memories.length);
+      close();
+    } else if (recall) {
+      client.tune(memories[Number(recall.dataset.recall)].freqHz);
+      close();
+    }
+  });
+  panel.querySelector("#mem-save").addEventListener("click", () => {
+    if (currentFreqHz === null) return;
+    memories = addMemory(memories, currentFreqHz);
+    $("v-mem").textContent = String(memories.length);
+    close();
+  });
 });
 
-// ---- Sibling switcher: merge this instance's own live state with
-// instances.json's report of its siblings (see INSTRUMENT-DECISIONS.md -
-// an instance can never successfully query its own coverage via
-// discovery, since its own server isn't listening yet when discovery
-// runs; the page itself already knows exactly who it is). ----
+// ---- SDR switcher segment: hidden unless there's something to switch to
+// (brief section 4: "appears only when there is something to switch to").
+// This page already knows its own identity (its own live WS connection),
+// so it merges itself into the list rather than expecting instances.json
+// to describe the instance serving it (INSTRUMENT-DECISIONS.md). ----
 let selfEntry = null;
 let siblingList = [];
+
+// Short instance id (matches the mockup's "sdr-hf"/"sdr-vhf" naming) -
+// derived from this page's own hostname (sdr-vhf.on8st.be -> sdr-vhf)
+// rather than the verbose front-end description, which belongs in the
+// #ident badge instead. Falls back to the description for local/dev
+// access where the hostname isn't in that form (e.g. "localhost").
+function shortInstanceName(fe) {
+  const host = location.hostname.split(".")[0];
+  return host && host !== "localhost" ? host : (fe.descriptionText || location.hostname);
+}
 
 function updateSelfEntry(fe) {
   selfEntry = {
     id: "self",
-    name: fe.descriptionText || location.hostname,
-    fe: fe.descriptionText,
-    lowHz: fe.frequencyHz + (fe.ifLowHz ?? 0),
-    highHz: fe.frequencyHz + (fe.ifHighHz ?? 0),
+    name: shortInstanceName(fe),
+    lowHz: currentCoverage.lowHz,
+    highHz: currentCoverage.highHz,
     url: null,
     isSelf: true,
   };
-  renderSwitcher();
+  renderSwitcherSegment();
 }
 
-function renderSwitcher() {
+function renderSwitcherSegment() {
   const all = selfEntry ? [selfEntry, ...siblingList] : siblingList;
-  if (all.length < 2) { $("switcher").hidden = true; return; }
-  $("switcher").hidden = false;
-  $("switcher-list").innerHTML = all.map((i) => {
-    const label = `${i.name} (${fmtMHz(i.lowHz)}–${fmtMHz(i.highHz)} MHz)`;
-    return i.isSelf || !i.url
-      ? `<li>${label}${i.isSelf ? " — here" : ""}</li>`
-      : `<li><a href="${i.url}">${label}</a></li>`;
-  }).join("");
+  $("sgm-sdr").hidden = all.length < 2;
+  if (all.length >= 2) $("v-sdr").textContent = selfEntry ? selfEntry.name : "";
 }
+
+createValuePanel($("sgm-sdr"), (panel, close) => {
+  const all = selfEntry ? [selfEntry, ...siblingList] : siblingList;
+  panel.innerHTML = `
+    <div class="pop-head"><span>Receivers</span><span>${all.length} detected on this host</span></div>
+    <div class="pop-body">
+      <div class="memlist">${all.map((i) => `
+        <div class="mem${i.isSelf ? " on" : ""}" ${i.url ? `data-url="${i.url}"` : ""}>
+          <span class="n">${i.isSelf ? "▸" : ""}</span>
+          <span><span class="f">${i.isSelf ? i.name : "sdr-" + i.id}</span><br>${fmtMHz(i.lowHz)}–${fmtMHz(i.highHz)} MHz</span>
+          <span class="m">${i.isSelf ? "here" : "↗"}</span>
+        </div>`).join("")}</div>
+    </div>`;
+  panel.addEventListener("click", (e) => {
+    const row = e.target.closest("[data-url]");
+    if (row) location.href = row.dataset.url;
+  });
+});
 
 fetch("instances.json", { cache: "no-store" })
   .then((r) => (r.ok ? r.json() : []))
-  .then((list) => { siblingList = Array.isArray(list) ? list : []; renderSwitcher(); })
-  .catch(() => { siblingList = []; renderSwitcher(); });
+  .then((list) => { siblingList = Array.isArray(list) ? list : []; renderSwitcherSegment(); })
+  .catch(() => { siblingList = []; renderSwitcherSegment(); });
+
+// ---- Drawer: rare things (telemetry, pause, export, notes) - "out of
+// the way and one action from anywhere" (brief section 4). ----
+const drawer = $("drawer");
+$("rare-things").addEventListener("click", () => {
+  drawer.classList.toggle("open");
+  if (drawer.classList.contains("open")) renderTelemetry();
+});
+$("drawer-close").addEventListener("click", () => drawer.classList.remove("open"));
+
+function renderTelemetry() {
+  const s = spectrumDisplay.getLastSpectrum();
+  $("tele").innerHTML = s ? `
+    <div><span>Sample rate</span><span>${(s.inputSamprate / 1e6).toFixed(3)} Ms/s</span></div>
+    <div><span>Noise BW</span><span>${s.noiseBwHz.toFixed(1)} Hz</span></div>
+    <div><span>RF gain</span><span>${s.rfGainDb.toFixed(1)} dB</span></div>
+    <div><span>RF atten</span><span>${s.rfAttenDb.toFixed(1)} dB</span></div>
+    <div><span>ADC overs</span><span>${s.adOver}</span></div>
+    <div><span>Zoom level</span><span>${s.zoomLevel}</span></div>
+  ` : `<div><span>Telemetry</span><span>not yet received</span></div>`;
+}
+
+$("pause-toggle").addEventListener("change", (e) => spectrumDisplay.setPaused(e.target.checked));
+$("export-csv").addEventListener("click", () => {
+  const current = spectrumDisplay.getLastSpectrum();
+  if (!current) return;
+  const blob = new Blob([spectrumToCsv(current, current.centerHz)], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "spectrum.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+$("notes-text").value = loadNotes();
+$("notes-text").addEventListener("input", (e) => saveNotes(e.target.value));

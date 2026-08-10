@@ -1,11 +1,11 @@
 // Live spectrum trace + waterfall, filling #display-area per the design
 // brief ("the receiver fills the screen... nothing floats over them").
-// The mockup's own canvas painting is explicitly throwaway (brief section
-// 2) - this is a fresh implementation, not a port of spectrum.js.
+// One canvas doing both (top = trace, bottom = waterfall), gridlines with
+// real frequency labels, and a highlighted band at the tuned frequency -
+// matching the approved design mockup's #scope exactly. The mockup's own
+// canvas painting is explicitly throwaway (brief section 2); this reads
+// real decoded data instead of the mockup's illustrative random noise.
 
-// A simple 5-stop black -> blue -> cyan -> yellow -> red heatmap. Not
-// perceptually-uniform (viridis/turbo would be), but exact, easy-to-verify
-// arithmetic beats an imported palette table for a first working version.
 const HEATMAP_STOPS = [
   [0, 0, 0],
   [0, 0, 180],
@@ -43,100 +43,190 @@ export function hzForPixel(x, width, absCenterHz, binWidthHz, binCount) {
   return startHz + (x / width) * spanHz;
 }
 
+/** Inverse of hzForPixel - which pixel column a given absolute frequency
+ * falls at, or null if it's outside the displayed span. */
+export function pixelForHz(hz, width, absCenterHz, binWidthHz, binCount) {
+  const spanHz = binWidthHz * binCount;
+  const startHz = absCenterHz - spanHz / 2;
+  const x = ((hz - startHz) / spanHz) * width;
+  return x >= 0 && x <= width ? x : null;
+}
+
+function fmtAxisLabel(hz) {
+  return (hz / 1e6).toFixed(3);
+}
+
+// How fast the autorange floor/ceiling adapts to the real incoming data
+// (0 = never moves, 1 = snaps instantly to the latest frame). Smoothed
+// rather than snapping so the display doesn't flicker frame to frame.
+const AUTORANGE_SMOOTHING = 0.15;
+const AUTORANGE_PADDING_DB = 4;
+
 export function createSpectrumDisplay(container) {
   container.innerHTML = "";
   container.classList.add("spectrum-display");
-  const traceCanvas = document.createElement("canvas");
-  const waterfallCanvas = document.createElement("canvas");
-  traceCanvas.className = "spectrum-trace";
-  waterfallCanvas.className = "spectrum-waterfall";
-  container.appendChild(traceCanvas);
-  container.appendChild(waterfallCanvas);
+  const canvas = document.createElement("canvas");
+  canvas.id = "scope";
+  container.appendChild(canvas);
+  const ctx = canvas.getContext("2d");
 
-  const TRACE_FRACTION = 0.35;
-
+  // Deliberately NOT using ctx.setTransform(dpr,...) to size this crisply
+  // on high-DPI screens: putImageData/createImageData (used for the
+  // waterfall rows below) always operate on raw backing-store pixels and
+  // ignore the current transform entirely, unlike fillRect/lineTo/stroke.
+  // Mixing the two - draw in CSS-pixel space via a transform, then
+  // putImageData assuming the same coordinates - silently writes rows at
+  // the wrong scale and position on any DPR != 1 display. Confirmed live:
+  // the trace rendered fine while the waterfall stayed permanently black.
+  // Simplest correct fix: do all math in raw canvas.width/height pixels,
+  // no transform, ever.
   function resize() {
     const rect = container.getBoundingClientRect();
-    traceCanvas.width = Math.max(1, Math.round(rect.width));
-    traceCanvas.height = Math.max(1, Math.round(rect.height * TRACE_FRACTION));
-    waterfallCanvas.width = Math.max(1, Math.round(rect.width));
-    waterfallCanvas.height = Math.max(1, Math.round(rect.height * (1 - TRACE_FRACTION)));
+    const dpr = window.devicePixelRatio || 1;
+    canvas.style.width = "100%";
+    canvas.style.height = "100%";
+    canvas.width = Math.max(1, Math.round(rect.width * dpr));
+    canvas.height = Math.max(1, Math.round(rect.height * dpr));
   }
   resize();
-  // A window resize isn't the only thing that changes this container's
-  // size - #control-block's own content (chips, switcher) loads
-  // asynchronously and can shrink #display-area without the window ever
-  // resizing. Confirmed live: sizing once at construction left the canvas
-  // taller than its actual container once real content had loaded.
   new ResizeObserver(resize).observe(container);
-
-  const traceCtx = traceCanvas.getContext("2d");
-  const waterfallCtx = waterfallCanvas.getContext("2d");
-  // Reasonable defaults; the design brief leaves "display settings" (auto-
-  // range, dB floor/ceiling) as a later, separate control ("reached from
-  // the canvas, not the readout") - this is a fixed starting range, not a
-  // protocol fact.
-  let minDb = -100;
-  let maxDb = -20;
-
-  function render(spectrum) {
-    const { binsDb } = spectrum;
-    const w = traceCanvas.width;
-    const h = traceCanvas.height;
-
-    traceCtx.fillStyle = "#000";
-    traceCtx.fillRect(0, 0, w, h);
-    traceCtx.strokeStyle = "#6f6";
-    traceCtx.beginPath();
-    for (let x = 0; x < w; x++) {
-      const db = binsDb[binIndexForPixel(x, w, binsDb.length)];
-      const y = h - Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb))) * h;
-      if (x === 0) traceCtx.moveTo(x, y); else traceCtx.lineTo(x, y);
-    }
-    traceCtx.stroke();
-
-    const ww = waterfallCanvas.width;
-    const wh = waterfallCanvas.height;
-    if (wh > 1) {
-      waterfallCtx.drawImage(waterfallCanvas, 0, 0, ww, wh - 1, 0, 1, ww, wh - 1);
-    }
-    const row = waterfallCtx.createImageData(ww, 1);
-    for (let x = 0; x < ww; x++) {
-      const db = binsDb[binIndexForPixel(x, ww, binsDb.length)];
-      const [r, g, b] = dbToColor(db, minDb, maxDb);
-      row.data[x * 4] = r;
-      row.data[x * 4 + 1] = g;
-      row.data[x * 4 + 2] = b;
-      row.data[x * 4 + 3] = 255;
-    }
-    waterfallCtx.putImageData(row, 0, 0);
-  }
 
   let paused = false;
   let lastSpectrum = null;
+  let tunedFreqHz = null;
+  let manualRange = null; // {minDb, maxDb} once the operator sets one explicitly
+  let smoothMinDb = null;
+  let smoothMaxDb = null;
 
-  function setRange(newMinDb, newMaxDb) {
-    minDb = newMinDb;
-    maxDb = newMaxDb;
+  function updateAutorange(binsDb) {
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < binsDb.length; i++) {
+      if (binsDb[i] < min) min = binsDb[i];
+      if (binsDb[i] > max) max = binsDb[i];
+    }
+    if (smoothMinDb === null) {
+      smoothMinDb = min;
+      smoothMaxDb = max;
+    } else {
+      smoothMinDb += (min - smoothMinDb) * AUTORANGE_SMOOTHING;
+      smoothMaxDb += (max - smoothMaxDb) * AUTORANGE_SMOOTHING;
+    }
   }
 
-  function setPaused(value) {
-    paused = value;
+  function currentRange() {
+    if (manualRange) return manualRange;
+    if (smoothMinDb === null) return { minDb: -100, maxDb: -20 };
+    return { minDb: smoothMinDb - AUTORANGE_PADDING_DB, maxDb: smoothMaxDb + AUTORANGE_PADDING_DB };
   }
 
-  const originalRender = render;
+  function draw() {
+    if (!lastSpectrum) return;
+    const { binsDb, centerHz, binWidthHz, binCount } = lastSpectrum;
+    const dpr = window.devicePixelRatio || 1;
+    const w = canvas.width;
+    const h = canvas.height;
+    if (w < 4 || h < 4) return;
+    const splitY = h * 0.46;
+    const { minDb, maxDb } = currentRange();
+
+    // Only the trace region gets wiped each frame - the waterfall region
+    // below it is never blanket-cleared, only scrolled (see below). An
+    // earlier version cleared the whole canvas here, which wiped out the
+    // waterfall's own history a split second before trying to scroll it -
+    // confirmed live: the trace rendered correctly while the waterfall
+    // stayed permanently black.
+    ctx.fillStyle = "#04060A";
+    ctx.fillRect(0, 0, w, splitY);
+
+    // Waterfall: scroll existing content down 1px, draw the newest row at
+    // the top of the waterfall region (matches the mockup's newest-on-top
+    // convention).
+    const wfTop = Math.floor(splitY);
+    const wfH = Math.floor(h - splitY);
+    if (wfH > 1) {
+      ctx.drawImage(canvas, 0, wfTop, w, wfH - 1, 0, wfTop + 1, w, wfH - 1);
+    }
+    if (wfH > 0) {
+      const row = ctx.createImageData(w, 1);
+      for (let x = 0; x < w; x++) {
+        const db = binsDb[binIndexForPixel(x, w, binCount)];
+        const [r, g, b] = dbToColor(db, minDb, maxDb);
+        row.data[x * 4] = r;
+        row.data[x * 4 + 1] = g;
+        row.data[x * 4 + 2] = b;
+        row.data[x * 4 + 3] = 255;
+      }
+      ctx.putImageData(row, 0, wfTop);
+    }
+
+    // Trace, filled below the line (matches the mockup's phosphor-green look).
+    ctx.beginPath();
+    ctx.moveTo(0, splitY);
+    for (let x = 0; x < w; x++) {
+      const db = binsDb[binIndexForPixel(x, w, binCount)];
+      const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
+      ctx.lineTo(x, splitY - t * (splitY - 14));
+    }
+    ctx.lineTo(w, splitY);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(75,224,138,0.10)";
+    ctx.fill();
+    ctx.beginPath();
+    for (let x = 0; x < w; x++) {
+      const db = binsDb[binIndexForPixel(x, w, binCount)];
+      const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
+      const y = splitY - t * (splitY - 14);
+      if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = "#4BE08A";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Tuned-frequency band, spanning the full height (matches the mockup).
+    if (tunedFreqHz !== null) {
+      const x = pixelForHz(tunedFreqHz, w, centerHz, binWidthHz, binCount);
+      if (x !== null) {
+        ctx.fillStyle = "rgba(86,199,255,0.13)";
+        ctx.fillRect(x - w * 0.0175, 0, w * 0.035, h);
+        ctx.strokeStyle = "#56C7FF";
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, h);
+        ctx.stroke();
+      }
+    }
+
+    // Gridlines + real frequency axis labels (not the mockup's illustrative
+    // fixed-span math - these use the actual decoded span).
+    ctx.strokeStyle = "rgba(42,52,65,0.9)";
+    ctx.fillStyle = "#78879A";
+    ctx.font = `${9 * dpr}px ui-monospace,monospace`;
+    for (let i = 1; i < 8; i++) {
+      const x = (w / 8) * i;
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, splitY);
+      ctx.stroke();
+      const hz = hzForPixel(x, w, centerHz, binWidthHz, binCount);
+      ctx.fillText(fmtAxisLabel(hz), x - 16 * dpr, splitY - 4 * dpr);
+    }
+  }
+
   return {
     render: (spectrum) => {
       lastSpectrum = spectrum;
-      if (!paused) originalRender(spectrum);
+      updateAutorange(spectrum.binsDb);
+      if (!paused) draw();
     },
     resize,
-    setRange,
-    getRange: () => ({ minDb, maxDb }),
-    setPaused,
+    setRange: (minDb, maxDb) => { manualRange = { minDb, maxDb }; if (!paused) draw(); },
+    getRange: () => currentRange(),
+    clearManualRange: () => { manualRange = null; },
+    setPaused: (v) => { paused = v; },
     isPaused: () => paused,
+    setTunedFreqHz: (hz) => { tunedFreqHz = hz; if (!paused) draw(); },
     getLastSpectrum: () => lastSpectrum,
-    traceCanvas,
-    waterfallCanvas,
+    canvas,
   };
 }

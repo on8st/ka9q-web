@@ -127,3 +127,62 @@ client-side from that connection and merge it with whatever
 `instances.json` to ever describe the instance serving it. No server or
 discovery-script change needed; this is a note for whoever builds the
 actual switcher UI, not a task for this discovery step.
+
+## Visual rework to match the approved mockup, and two real canvas bugs found in the process (2026-08-10)
+
+The UI built through the tuning/mode/step/band/meter/rare-things commits
+was functionally verified at every step but never checked against the
+approved design mockup's actual visual target - a plain stacked settings-
+form page (`<dl>`, separate `<form>`, full-page "Memories"/"Other
+receivers" sections, default browser styling) instead of the mockup's
+tight, single dockslot instrument bar. Caught only when asked to compare
+screenshots directly against the mockup - a real process gap: functional
+correctness was verified continuously, visual fidelity to the mockup
+wasn't checked after the initial scaffolding step.
+
+Reworked to adopt the mockup's CSS design system and segment+popover
+interaction pattern close to verbatim (`.sgm`/`.cap`/`.val`, anchored
+`.pop`-style panels with above/below flip positioning, `.digits` LCD
+styling with lead-zero dimming, `#ident`/`#toolbar` chrome, a slide-in
+`#drawer` for rare-things). Deliberately did NOT add visual chrome for
+features `tests/check-parity.mjs` still marks unbuilt (audio, zoom,
+colormap, CW shift, bandwidth/filter-edge control) - an inert-looking
+control that does nothing would be worse than the plain page it replaced.
+
+Rebuilt the spectrum/waterfall as one canvas (matching the mockup's
+`#scope` exactly) instead of two, with real gridlines/frequency-axis
+labels and genuine autoranging (smoothed min/max computed from the
+actual incoming bin data) replacing the earlier fixed `-100/-20dB`
+guess. Two real bugs found and fixed via direct pixel inspection, not
+just visual inspection:
+
+1. **The whole canvas was being cleared every frame**, including the
+   waterfall's own scrolled history, immediately before trying to scroll
+   it - so the waterfall could only ever show the single newest row.
+   Fixed by only clearing the trace region each frame.
+2. **`putImageData`/`createImageData` ignore the canvas's current
+   transform entirely** (unlike `fillRect`/`lineTo`/`stroke`, which
+   respect it) - mixing `ctx.setTransform(dpr,...)` for crisp high-DPI
+   drawing with raw pixel-space `putImageData` calls silently wrote
+   waterfall rows at the wrong scale and vertical position on any
+   display with `devicePixelRatio != 1`. Fixed by doing all drawing math
+   in raw `canvas.width`/`canvas.height` pixels throughout, no transform.
+
+Both fixes verified directly via `getImageData` pixel sampling (not just
+screenshots) against the real live VHF instance.
+
+**A third, separate, unresolved finding**: even with both bugs fixed,
+the waterfall still looks nearly empty in practice - confirmed via a
+real WS frame count that this server sends real 0x7F spectrum frames to
+an idle session at roughly **1 per 7.5 seconds**, not the ~10/sec implied
+by `spectrum_poll_us`'s own 100ms default (`ka9q-web.c:667`). The poll
+loop itself (`spectrum_thread()`, `ka9q-web.c:~3185`) does run every
+`spectrum_poll_us`; something between that internal poll and the actual
+WebSocket broadcast to the browser is throttling much further. Not yet
+traced to a root cause - needs its own investigation pass through
+`process_spectrum_packet()`/`send_ws_binary_to_session()` before
+concluding whether this is fixable client-side (a command this UI isn't
+sending yet, e.g. a faster explicit poll-rate request - see the stock
+`spectrumPollInput`/`spectrumPollButton` in the parity manifest, still
+marked unbuilt here) or requires understanding server-side session
+activation state.
