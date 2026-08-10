@@ -6,6 +6,8 @@ import { Ka9qWebClient } from "./ws-client.js";
 import { createDigitDisplay } from "./freq-digits.js";
 import { createValuePanel } from "./value-panel.js";
 import { STEP_OPTIONS_HZ, applyStep, fmtStep } from "./tune-step.js";
+import { bandsInCoverage } from "./band-options.js";
+import { loadMemories, addMemory, deleteMemory } from "./memories.js";
 
 const $ = (id) => document.getElementById(id);
 let currentFreqHz = null;
@@ -44,6 +46,52 @@ client.addEventListener("frontend", (e) => {
   $("fe-coverage").textContent = `${fmtMHz(lowHz)}–${fmtMHz(highHz)} MHz`;
   $("fe-power").textContent = fe.ifPowerDb !== null ? `${fe.ifPowerDb.toFixed(1)} dB` : "—";
   updateSelfEntry(fe);
+  renderBandChips(lowHz, highHz);
+});
+
+// Band quick-select: only bands this receiver can actually reach (see
+// band-options.js - not a stock behaviour, a deliberate adaptation since
+// each instrument covers one slice of spectrum, unlike the stock all-in-
+// one UI). Re-rendered whenever coverage is known (every "frontend" event).
+function renderBandChips(lowHz, highHz) {
+  const bands = bandsInCoverage("amateur", lowHz, highHz);
+  $("band-chips").innerHTML = bands
+    .map((b) => `<button type="button" data-freq="${b.freq}">${b.label}</button>`)
+    .join("");
+}
+$("band-chips").addEventListener("click", (e) => {
+  const freq = e.target.dataset.freq;
+  if (freq) client.tune(Number(freq));
+});
+
+// ---- Memories: save/recall, not the stock UI's full 50-slot system (see
+// memories.js) - functional intent, not a port. ----
+let memories = loadMemories();
+
+function renderMemories() {
+  $("memory-chips").innerHTML = memories.map((m, i) => `
+    <span class="memory-chip">
+      <button type="button" data-recall="${i}">${m.label}</button>
+      <button type="button" data-delete="${i}" title="Delete" class="memory-delete">×</button>
+    </span>`).join("");
+}
+renderMemories();
+
+$("memory-chips").addEventListener("click", (e) => {
+  const recallIdx = e.target.dataset.recall;
+  const deleteIdx = e.target.dataset.delete;
+  if (recallIdx !== undefined) {
+    client.tune(memories[Number(recallIdx)].freqHz);
+  } else if (deleteIdx !== undefined) {
+    memories = deleteMemory(memories, Number(deleteIdx));
+    renderMemories();
+  }
+});
+
+$("memory-save").addEventListener("click", () => {
+  if (currentFreqHz === null) return;
+  memories = addMemory(memories, currentFreqHz);
+  renderMemories();
 });
 
 client.addEventListener("tunedFreq", (e) => {

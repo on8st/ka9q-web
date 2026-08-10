@@ -46,6 +46,13 @@
   }
   .value-panel button { background: #222; color: #ddd; border: 1px solid #444; border-radius: 3px; }
   .value-panel button:hover { background: #333; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0; }
+  .chips button { background: #222; color: #ddd; border: 1px solid #444; border-radius: 12px; padding: 0.2rem 0.7rem; }
+  .chips button:hover { background: #333; }
+  .memory-chip { display: inline-flex; }
+  .memory-chip button[data-recall] { border-radius: 12px 0 0 12px; }
+  .memory-delete { border-radius: 0 12px 12px 0 !important; border-left: none !important; color: #a55; }
 </style>
 </head>
 <body>
@@ -73,6 +80,12 @@
   <label>Or type an exact frequency (kHz): <input id="tune-input" type="text" inputmode="decimal" size="12"></label>
   <button type="submit">Tune</button>
 </form>
+
+<div class="chips" id="band-chips"></div>
+
+<h2>Memories</h2>
+<div class="chips" id="memory-chips"></div>
+<button type="button" id="memory-save">Save current frequency</button>
 
 <div id="switcher" hidden>
   <h2>Other receivers on this station</h2>
