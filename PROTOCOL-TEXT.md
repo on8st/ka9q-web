@@ -64,14 +64,27 @@ frequency at all**. Any instrument-UI code reading `BFREQ` needs to treat
 this specific value as "no real session yet," not as VHF/UHF suddenly
 being tuned to 10MHz (which is outside both bands' coverage entirely).
 
+## Outbound F: confirmed live (2026-08-10, explicit go-ahead)
+
+Sent `C:ctest001:1:F:145500.000` to the live VHF instance from a throwaway
+connection: got `ACK:ctest001:1` immediately, then `BFREQ:145500000.000`
+(echoed in Hz - `145500000 > 1000000` so the magnitude-based ambiguity
+rule above resolves correctly). Confirmed a completely independent session:
+reconnecting fresh afterward showed the stale `BFREQ:10000000.000` default
+again, not stuck at 145.5MHz - each client genuinely gets its own channel,
+torn down cleanly on disconnect with zero effect on any other listener.
+Envelope, ACK, and the `F:`/`BFREQ` round-trip are now verified against
+real behaviour, not just read from source.
+
 ## Explicitly not yet done in this pass
 
-- Sending any outbound command (`F:`, mode-setting, `Z:*`) against the
-  live production instances - each would create a real session/channel on
-  the real radiod backends. Passive listening (what this pass did) has no
-  side effects; sending a command does. Not attempted without asking
-  first, per this repo's standing caution around anything that changes
-  live-production behaviour rather than just observing it.
+- Mode-setting's raw outbound command format - not located as a `ws.send()`
+  call site, and not guessed at. `setMode()` in `radio.js` needs a closer
+  read before any instrument-UI mode-setting code is written.
+- Zoom/spectrum-display commands (`Z:*` beyond `Z:SIZE`), memory slots, and
+  the rest of the broader control surface - deliberately out of scope for
+  this pass, which targeted only what a minimal live-status + basic-tuning
+  UI needs.
 - The mode-setting raw command format (see table above).
 - Zoom/spectrum-display commands, memory slots, and the rest of the
   broader control surface - deliberately out of scope for this pass, which
