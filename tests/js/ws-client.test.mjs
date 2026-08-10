@@ -174,3 +174,19 @@ test("commands are silently dropped when the socket isn't open (no throw)", () =
   assert.doesNotThrow(() => client.tune(14_250_000));
   assert.doesNotThrow(() => client.setMode("fm"));
 });
+
+test("startSpectrum()/stopSpectrum() send raw S:/S:STOP, NOT wrapped in the C: envelope", () => {
+  // Confirmed against radio.js's own on_ws_open() (html/radio.js:702-704):
+  // ws.send("S:STOP") / ws.send("S:") directly, unlike every other outbound
+  // command. Without this, spectrum_thread (ka9q-web.c) never starts at
+  // all - confirmed live via packet capture, PROTOCOL-TEXT.md.
+  const client = new Ka9qWebClient("ws://unused/");
+  client.clientId = "ctest";
+  const { sent, ws } = mockSocket();
+  client._ws = ws;
+
+  client.startSpectrum();
+  client.stopSpectrum();
+
+  assert.deepEqual(sent, ["S:", "S:STOP"]);
+});

@@ -45,7 +45,19 @@ export class Ka9qWebClient extends EventTarget {
   connect() {
     this._ws = new WebSocket(this.url);
     this._ws.binaryType = "arraybuffer";
-    this._ws.addEventListener("open", () => this.dispatchEvent(new Event("open")));
+    this._ws.addEventListener("open", () => {
+      // Without this, the dedicated spectrum poller (spectrum_thread,
+      // ka9q-web.c) never starts at all and 0x7F frames only trickle in
+      // from some other, much slower incidental path - confirmed live via
+      // packet capture (PROTOCOL-TEXT.md). Stop-then-start, matching
+      // radio.js's own on_ws_open() exactly: STOP first clears stale
+      // spectrum state a reattached session (PROTOCOL-TEXT.md - sessions
+      // reattach by client IP, not recreate) might still have, then START
+      // after a short delay so the STOP is processed first.
+      this._sendRaw("S:STOP");
+      setTimeout(() => this._sendRaw("S:"), 80);
+      this.dispatchEvent(new Event("open"));
+    });
     this._ws.addEventListener("close", () => this.dispatchEvent(new Event("close")));
     this._ws.addEventListener("error", (e) => this.dispatchEvent(new CustomEvent("error", { detail: e })));
     this._ws.addEventListener("message", (evt) => this._onMessage(evt));
@@ -54,6 +66,20 @@ export class Ka9qWebClient extends EventTarget {
 
   close() {
     try { this._ws?.close(); } catch (e) { /* ignore */ }
+  }
+
+  /** Explicit start/stop, for a future pause-the-spectrum-stream-entirely
+   * control (distinct from spectrum-canvas.js's setPaused(), which still
+   * receives data but stops drawing it). */
+  startSpectrum() { this._sendRaw("S:"); }
+  stopSpectrum() { this._sendRaw("S:STOP"); }
+
+  /** S:/S:STOP are sent raw, NOT wrapped in the C:<clientId>:<seq>:
+   * envelope every other outbound command uses - confirmed against
+   * radio.js's own on_ws_open(), which calls ws.send("S:...") directly. */
+  _sendRaw(text) {
+    if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
+    this._ws.send(text);
   }
 
   /** Sends a tune command (kHz, 3 decimals, per PROTOCOL-TEXT.md) wrapped

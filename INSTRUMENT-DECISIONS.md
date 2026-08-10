@@ -171,18 +171,35 @@ just visual inspection:
 Both fixes verified directly via `getImageData` pixel sampling (not just
 screenshots) against the real live VHF instance.
 
-**A third, separate, unresolved finding**: even with both bugs fixed,
-the waterfall still looks nearly empty in practice - confirmed via a
-real WS frame count that this server sends real 0x7F spectrum frames to
-an idle session at roughly **1 per 7.5 seconds**, not the ~10/sec implied
-by `spectrum_poll_us`'s own 100ms default (`ka9q-web.c:667`). The poll
-loop itself (`spectrum_thread()`, `ka9q-web.c:~3185`) does run every
-`spectrum_poll_us`; something between that internal poll and the actual
-WebSocket broadcast to the browser is throttling much further. Not yet
-traced to a root cause - needs its own investigation pass through
-`process_spectrum_packet()`/`send_ws_binary_to_session()` before
-concluding whether this is fixable client-side (a command this UI isn't
-sending yet, e.g. a faster explicit poll-rate request - see the stock
-`spectrumPollInput`/`spectrumPollButton` in the parity manifest, still
-marked unbuilt here) or requires understanding server-side session
-activation state.
+**A third issue, found the same way and now resolved**: even with both
+bugs fixed, the waterfall still looked nearly empty in practice -
+confirmed via a real WS frame count that this server sent real 0x7F
+spectrum frames to an idle session at roughly 1 per 7.5 seconds, not the
+~10/sec implied by `spectrum_poll_us`'s own 100ms default
+(`ka9q-web.c:667`). Root-caused with a live packet capture (`sudo tcpdump`
+on the station's Docker bridge, correlated with a real WS connection),
+which showed the actual bottleneck wasn't radiod (broadcasting
+constantly, independent of ka9q-web) or ka9q-web's response handling - it
+was that **`ka9q-web` itself was barely sending spectrum requests at
+all**. Read `ka9q-web.c`'s `case 'S':` handler to find out why:
+`spectrum_thread()` - the dedicated 100ms poller - **only starts when the
+client sends an explicit raw `S:` command**, not automatically on
+connect. `html/radio.js`'s own `on_ws_open()` (`html/radio.js:702-704`)
+does exactly this - `ws.send("S:STOP")` immediately (clearing stale
+spectrum state a reattached session might still have - PROTOCOL-TEXT.md's
+"sessions reattach by client IP" finding again), then `ws.send("S:")`
+after an 80ms delay - sent **raw, not wrapped** in the `C:<clientId>:<seq>:`
+envelope every other outbound command uses. This instrument UI's
+`ws-client.js` never sent it at all, so `spectrum_thread` never started;
+whatever slow trickle of frames was arriving came from some other,
+incidental path (very likely a stale/reattached session from earlier
+testing, given the "sessions reattach" behaviour already documented).
+
+Fixed in `Ka9qWebClient.connect()`: replicates `on_ws_open()`'s exact
+STOP-then-START-after-80ms sequence via a new `_sendRaw()` (unwrapped,
+distinct from `_sendCommand()`'s envelope) plus public
+`startSpectrum()`/`stopSpectrum()` methods. Verified live: real spectrum
+frame rate went from ~2 in 15s to **91 in 10s** (~9.1/sec, matching the
+100ms default almost exactly) - confirmed via both a fresh packet count
+and a screenshot showing the waterfall actually filling in with real
+colour instead of staying black.
