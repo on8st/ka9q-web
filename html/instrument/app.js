@@ -5,8 +5,11 @@
 import { Ka9qWebClient } from "./ws-client.js";
 import { createDigitDisplay } from "./freq-digits.js";
 import { createValuePanel } from "./value-panel.js";
+import { STEP_OPTIONS_HZ, applyStep, fmtStep } from "./tune-step.js";
 
 const $ = (id) => document.getElementById(id);
+let currentFreqHz = null;
+let stepHz = 1000;
 
 // Confirmed against the stock UI's own mode <select> (html/radio.html) -
 // wusb/wlsb are commented out there too, so left out here as well.
@@ -45,9 +48,30 @@ client.addEventListener("frontend", (e) => {
 
 client.addEventListener("tunedFreq", (e) => {
   const { hz } = e.detail;
+  currentFreqHz = hz;
   $("tuned-freq").textContent = `${fmtMHz(hz)} MHz`;
   $("tune-input").value = (hz / 1000).toFixed(3);
   digitDisplay.render(hz);
+});
+
+// "The step is visible, not hidden... tuning by the amount shown."
+$("step-value").textContent = fmtStep(stepHz);
+$("step-up").addEventListener("click", () => {
+  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, stepHz, 1));
+});
+$("step-down").addEventListener("click", () => {
+  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, stepHz, -1));
+});
+// "Choosing a different step happens on the step itself."
+createValuePanel($("step-value"), (panel, close) => {
+  panel.innerHTML = STEP_OPTIONS_HZ.map((s) => `<button type="button" data-step="${s}">${fmtStep(s)}</button>`).join("");
+  panel.addEventListener("click", (e) => {
+    const s = e.target.dataset.step;
+    if (!s) return;
+    stepHz = Number(s);
+    $("step-value").textContent = fmtStep(stepHz);
+    close();
+  });
 });
 
 client.addEventListener("mode", (e) => {
