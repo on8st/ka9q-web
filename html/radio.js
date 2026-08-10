@@ -832,6 +832,42 @@ function applyQuickBW() {
             } catch (e) {}
           }, 100);
         } catch (e) {}
+
+        // Deep-link support (station repo phase 7): read ?freq=<Hz>&mode=<mode>
+        // from the URL, the same query-param convention UberSDR's own
+        // deep-link already uses. Applied once, on the FIRST successful
+        // connection only (window._deepLinkApplied guard) - not on later
+        // reconnects, so it doesn't fight a retune the operator made since.
+        // Deliberately reuses setFrequencyW()/setMode() - the exact same
+        // functions a manual UI interaction calls - rather than poking
+        // frequencyHz/target_preset directly: those get overwritten by
+        // loadSettings()'s own localStorage restore (which runs earlier in
+        // the page's init sequence, before any WebSocket even opens), so
+        // anything set that early loses to it. Running after the socket is
+        // open and the page's own reconnect-time state pushes have had a
+        // moment to settle is the only point that reliably sticks.
+        if (!window._deepLinkApplied) {
+          window._deepLinkApplied = true;
+          try {
+            const params = new URLSearchParams(window.location.search);
+            const qFreq = params.get('freq');
+            const qMode = params.get('mode');
+            if (qFreq !== null && !isNaN(parseFloat(qFreq))) {
+              setTimeout(() => {
+                try {
+                  const freqEl = document.getElementById('freq');
+                  if (freqEl) {
+                    freqEl.value = (parseFloat(qFreq) / 1000.0).toFixed(3);
+                    setFrequencyW();
+                  }
+                } catch (e) { console.warn('deep-link freq apply failed', e); }
+                try {
+                  if (qMode !== null && qMode.trim() !== '') setMode(qMode.trim(), true);
+                } catch (e) { console.warn('deep-link mode apply failed', e); }
+              }, 500);
+            }
+          } catch (e) { console.warn('deep-link query parse failed', e); }
+        }
       }
 
       // Send a request to the server to change the spectrum poll interval (milliseconds).
