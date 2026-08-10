@@ -1,0 +1,6 @@
+{
+  "_comment": "Hand-maintained by design - this is the one exception the instrument UI's design brief allows to zero-config discovery: the mapping of public hostnames to instances lives on a different host (oldmini, 192.168.36.68) entirely, in its own Caddyfile, and cannot be read from this host. Verified against oldmini:/etc/caddy/Caddyfile directly (2026-08-10) rather than guessed. Keyed by this instance's own -p port. Update this file (and only this file) if oldmini's Caddy config for these hostnames ever changes.",
+  "8081": "sdr-vhf.on8st.be",
+  "8082": "sdr-uhf.on8st.be",
+  "8083": "sdr-hf.on8st.be"
+}
