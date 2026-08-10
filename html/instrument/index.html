@@ -53,6 +53,10 @@
   .memory-chip { display: inline-flex; }
   .memory-chip button[data-recall] { border-radius: 12px 0 0 12px; }
   .memory-delete { border-radius: 0 12px 12px 0 !important; border-left: none !important; color: #a55; }
+
+  .meter-bar-track { width: 12rem; height: 0.8rem; background: #222; border: 1px solid #444; border-radius: 3px; }
+  .meter-bar-fill { height: 100%; background: #6c6; border-radius: 2px; }
+  .meter-analog { display: block; }
 </style>
 </head>
 <body>
@@ -62,7 +66,7 @@
 <dl>
   <dt>Front end</dt><dd id="fe-desc">—</dd>
   <dt>Coverage</dt><dd id="fe-coverage">—</dd>
-  <dt>Signal (IF power)</dt><dd id="fe-power">—</dd>
+  <dt>Signal (IF power) <span id="meter-settings" class="value-anchor" title="Meter style">⚙</span></dt><dd id="fe-power">—</dd>
   <dt>Tuned frequency</dt><dd id="tuned-freq">—</dd>
   <dt>Mode</dt><dd id="tuned-mode">—</dd>
 </dl>

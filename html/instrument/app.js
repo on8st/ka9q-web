@@ -8,6 +8,7 @@ import { createValuePanel } from "./value-panel.js";
 import { STEP_OPTIONS_HZ, applyStep, fmtStep } from "./tune-step.js";
 import { bandsInCoverage } from "./band-options.js";
 import { loadMemories, addMemory, deleteMemory } from "./memories.js";
+import { createMeter } from "./meter.js";
 
 const $ = (id) => document.getElementById(id);
 let currentFreqHz = null;
@@ -38,15 +39,28 @@ const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => client.tune(
 client.addEventListener("open", () => { $("conn-state").textContent = "connected"; });
 client.addEventListener("close", () => { $("conn-state").textContent = "disconnected"; });
 
+const meter = createMeter($("fe-power"));
+
 client.addEventListener("frontend", (e) => {
   const fe = e.detail;
   $("fe-desc").textContent = fe.descriptionText || "(unknown front end)";
   const lowHz = fe.frequencyHz + (fe.ifLowHz ?? 0);
   const highHz = fe.frequencyHz + (fe.ifHighHz ?? 0);
   $("fe-coverage").textContent = `${fmtMHz(lowHz)}–${fmtMHz(highHz)} MHz`;
-  $("fe-power").textContent = fe.ifPowerDb !== null ? `${fe.ifPowerDb.toFixed(1)} dB` : "—";
+  meter.render(fe.ifPowerDb);
   updateSelfEntry(fe);
   renderBandChips(lowHz, highHz);
+});
+
+// "A settings panel holds the choice, never a second meter."
+createValuePanel($("meter-settings"), (panel, close) => {
+  panel.innerHTML = `<button type="button" data-style="bar">Bar</button><button type="button" data-style="analog">Analog</button>`;
+  panel.addEventListener("click", (e) => {
+    const style = e.target.dataset.style;
+    if (!style) return;
+    meter.setStyle(style);
+    close();
+  });
 });
 
 // Band quick-select: only bands this receiver can actually reach (see
