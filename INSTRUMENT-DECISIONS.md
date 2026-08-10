@@ -203,3 +203,24 @@ frame rate went from ~2 in 15s to **91 in 10s** (~9.1/sec, matching the
 100ms default almost exactly) - confirmed via both a fresh packet count
 and a screenshot showing the waterfall actually filling in with real
 colour instead of staying black.
+
+**A fourth issue, reported live by the station operator with a
+screenshot**: HF's spectrum/waterfall showed a hard, one-pixel-wide
+discontinuity exactly at the centre gridline - looked like the two halves
+of the band were swapped. Root cause was server-side this time, not in
+this instrument UI's own code: `ka9q-web.c`'s `handle_bin_data()`
+unconditionally applies a DC-centring circular shift written for a
+complex→complex FFT's wrapped bin order, but a real→complex FFT
+(`Frontend.isreal`, sent to the browser as `FE_ISREAL` - see
+`status-decode.js`'s `FIELD_FE_ISREAL`) has no negative-frequency half at
+all; its bins already arrive monotonic 0..Nyquist, so the same shift
+splices the Nyquist bin directly onto DC instead of centring anything.
+Confirmed live: HF and UHF's front ends both report `isreal=true`, VHF
+reports `false`. Fixed by branching `handle_bin_data()` on
+`Frontend.isreal` - real front ends now get a plain in-order fill,
+complex front ends keep the original (correct, for them) shift unchanged.
+Full derivation and the exact diff rationale: `PROTOCOL-SPECTRUM.md`'s
+"Bin order bug for real-sampled front ends" section. Because this fix is
+gated on the wire-confirmed `isreal` flag rather than a demod-type guess,
+it's provably inert for VHF (unchanged code path) regardless of whether
+the original "HF-specific legacy demod" hypothesis was the full story.

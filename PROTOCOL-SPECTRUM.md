@@ -73,3 +73,37 @@ baseline) - the HF cross-check is what actually confirms the relationship,
 and the existing frequency-offset fix's own client-side math
 (`getIfBounds()`, `spectrum.js`) is the reference implementation to follow
 for the general (possibly-asymmetric) case.
+
+## Bin order bug for real-sampled front ends (fixed, `on8st-vhf-uhf`)
+
+Live on HF (2026-08-10): the rendered trace and waterfall showed a hard,
+one-pixel-wide discontinuity exactly at the centre gridline - confirmed by
+screenshot, not just a hunch. Root cause was server-side, in
+`handle_bin_data()` in `ka9q-web.c` (the function that fills the `power[]`
+array later encoded into the bytes described above): it unconditionally
+performed a DC-centring circular shift -
+
+```c
+int i = l_count / 2; // DC
+do { power[i] = ...; i++; if (i == l_count) i = 0; } while (i != l_count / 2);
+```
+
+- written for a complex→complex FFT's wrapped bin order
+(`[0..+N/2-1,-N/2..-1]`), rotating it into monotonic centre-out order. A
+**real→complex FFT** (`Frontend.isreal` in `radio.h`, forwarded to the
+browser as `FE_ISREAL`) has no negative-frequency half at all - its bins
+already arrive in monotonic 0..Nyquist order. Applying the same shift to
+already-monotonic data doesn't centre anything; it splices the
+Nyquist-adjacent bin directly onto the DC bin, which is exactly the seam
+that was reported.
+
+Confirmed live via each front end's own `FE_ISREAL` field: HF and UHF both
+report `isreal=true` (real-sampled ADCs), VHF reports `false`
+(complex/IQ-sampled Airspy tuner). The fix branches `handle_bin_data()` on
+`Frontend.isreal` directly - real front ends get a plain in-order copy
+(same shape as `handle_bin_byte_data()`'s), complex front ends keep the
+original shift unchanged. This is why VHF never showed the bug (never took
+the wrong branch) and why UHF's identical `isreal=true` didn't visibly show
+it either - UHF's live band was too quiet/uniform during comparison
+screenshots for a one-bin seam to be visually obvious, not evidence the bug
+was absent there.

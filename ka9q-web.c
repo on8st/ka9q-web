@@ -3049,6 +3049,27 @@ static int handle_bin_data(float *power, int npower, uint8_t const *cp, unsigned
     return 0;
   sp->bins_max_db = -INFINITY;
   sp->bins_min_db = +INFINITY;
+  // A real->complex FFT (Frontend.isreal, see radio.h) already yields bins
+  // in monotonic 0..Nyquist order - there is no negative-frequency half to
+  // rotate in. The DC-centering shift below is only correct for a
+  // complex->complex FFT's wrapped bin order ([0..+N/2-1,-N/2..-1]); applied
+  // to an already-monotonic real-FFT buffer it splices the Nyquist-adjacent
+  // bin directly onto DC, producing a hard seam at the display center.
+  if (Frontend.isreal) {
+    for (int i = 0; i < l_count; i++) {
+      double p = decode_float(cp, sizeof(float));
+      p = power2dB(p);
+      if (p == -INFINITY)
+        p = -150;
+      power[i] = (float)p;
+      if (p > sp->bins_max_db)
+        sp->bins_max_db = p;
+      if (p < sp->bins_min_db)
+        sp->bins_min_db = p;
+      cp += sizeof(float);
+    }
+    return 0;
+  }
   int i = l_count / 2; // DC
   do {
     double p = decode_float(cp, sizeof(float));
