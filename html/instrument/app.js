@@ -11,6 +11,8 @@ import { loadMemories, addMemory, deleteMemory } from "./memories.js";
 import { createMeter } from "./meter.js";
 import { createSpectrumDisplay } from "./spectrum-canvas.js";
 import { absoluteCenterHz } from "./spectrum-decode.js";
+import { loadNotes, saveNotes } from "./notes.js";
+import { spectrumToCsv } from "./spectrum-export.js";
 
 const $ = (id) => document.getElementById(id);
 let currentFreqHz = null;
@@ -45,9 +47,63 @@ const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => client.tune(
 // same correction this fork's frequency-offset fix already applies to
 // tuned-frequency display (PROTOCOL-SPECTRUM.md).
 const spectrumDisplay = createSpectrumDisplay($("display-area"));
+let lastAbsSpectrum = null;
 client.addEventListener("spectrum", (e) => {
   const abs = absoluteCenterHz(e.detail, frontendFrequencyHz);
-  spectrumDisplay.render({ ...e.detail, centerHz: abs });
+  lastAbsSpectrum = { ...e.detail, centerHz: abs };
+  spectrumDisplay.render(lastAbsSpectrum);
+});
+
+// "Display settings belong to the display... the operator points at what
+// they want to change." (brief section 4) - dB floor/ceiling, reached by
+// clicking the display itself, not a readout value.
+createValuePanel($("display-area"), (panel, close) => {
+  const { minDb, maxDb } = spectrumDisplay.getRange();
+  panel.innerHTML = `
+    <label>Floor (dB): <input type="text" id="db-floor" value="${minDb}" size="4"></label>
+    <label>Ceiling (dB): <input type="text" id="db-ceiling" value="${maxDb}" size="4"></label>
+    <button type="button" id="db-apply">Apply</button>`;
+  panel.querySelector("#db-apply").addEventListener("click", () => {
+    const floor = parseFloat(panel.querySelector("#db-floor").value);
+    const ceiling = parseFloat(panel.querySelector("#db-ceiling").value);
+    if (Number.isFinite(floor) && Number.isFinite(ceiling) && ceiling > floor) {
+      spectrumDisplay.setRange(floor, ceiling);
+    }
+    close();
+  });
+});
+
+// "Rare things live in one panel... out of the way and one action from
+// anywhere." Telemetry, a pause toggle, CSV export, and notes.
+createValuePanel($("rare-things"), (panel, close) => {
+  const s = spectrumDisplay.getLastSpectrum();
+  panel.className = "value-panel rare-panel";
+  panel.innerHTML = `
+    <h3>Telemetry</h3>
+    <dl>
+      <dt>Sample rate</dt><dd>${s ? (s.inputSamprate / 1e6).toFixed(3) + " Msps" : "—"}</dd>
+      <dt>Noise bandwidth</dt><dd>${s ? s.noiseBwHz.toFixed(1) + " Hz" : "—"}</dd>
+      <dt>RF gain / atten</dt><dd>${s ? `${s.rfGainDb.toFixed(1)} / ${s.rfAttenDb.toFixed(1)} dB` : "—"}</dd>
+      <dt>A/D overflows</dt><dd>${s ? s.adOver : "—"}</dd>
+    </dl>
+    <h3>Behaviour</h3>
+    <label><input type="checkbox" id="pause-toggle" ${spectrumDisplay.isPaused() ? "checked" : ""}> Pause display updates</label>
+    <h3>Export</h3>
+    <button type="button" id="export-csv" ${s ? "" : "disabled"}>Download current spectrum (CSV)</button>
+    <h3>Notes</h3>
+    <textarea id="notes-text" rows="3" cols="30">${loadNotes()}</textarea>`;
+  panel.querySelector("#pause-toggle").addEventListener("change", (e) => spectrumDisplay.setPaused(e.target.checked));
+  panel.querySelector("#export-csv").addEventListener("click", () => {
+    const current = spectrumDisplay.getLastSpectrum();
+    if (!current) return;
+    const blob = new Blob([spectrumToCsv(current, current.centerHz)], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "spectrum.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  panel.querySelector("#notes-text").addEventListener("input", (e) => saveNotes(e.target.value));
 });
 
 client.addEventListener("open", () => { $("conn-state").textContent = "connected"; });

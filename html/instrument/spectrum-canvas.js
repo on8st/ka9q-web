@@ -112,5 +112,31 @@ export function createSpectrumDisplay(container) {
     waterfallCtx.putImageData(row, 0, 0);
   }
 
-  return { render, resize, traceCanvas, waterfallCanvas };
+  let paused = false;
+  let lastSpectrum = null;
+
+  function setRange(newMinDb, newMaxDb) {
+    minDb = newMinDb;
+    maxDb = newMaxDb;
+  }
+
+  function setPaused(value) {
+    paused = value;
+  }
+
+  const originalRender = render;
+  return {
+    render: (spectrum) => {
+      lastSpectrum = spectrum;
+      if (!paused) originalRender(spectrum);
+    },
+    resize,
+    setRange,
+    getRange: () => ({ minDb, maxDb }),
+    setPaused,
+    isPaused: () => paused,
+    getLastSpectrum: () => lastSpectrum,
+    traceCanvas,
+    waterfallCanvas,
+  };
 }

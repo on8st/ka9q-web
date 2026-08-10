@@ -84,11 +84,32 @@
   .meter-bar-track { width: 12rem; height: 0.8rem; background: #222; border: 1px solid #444; border-radius: 3px; }
   .meter-bar-fill { height: 100%; background: #6c6; border-radius: 2px; }
   .meter-analog { display: block; }
+
+  .rare-button {
+    position: fixed;
+    top: 0.5rem;
+    right: 0.5rem;
+    z-index: 20;
+    background: #222;
+    color: #ddd;
+    border: 1px solid #444;
+    border-radius: 50%;
+    width: 2rem;
+    height: 2rem;
+  }
+  .rare-panel {
+    display: block;
+    max-width: 20rem;
+  }
+  .rare-panel h3 { margin: 0.6rem 0 0.2rem; font-size: 0.85rem; color: #888; }
+  .rare-panel dl { grid-template-columns: 8rem 1fr; margin: 0; }
+  .rare-panel textarea { width: 100%; background: #222; color: #ddd; border: 1px solid #444; }
 </style>
 </head>
 <body>
 
 <div id="display-area"></div>
+<button type="button" id="rare-things" class="rare-button" title="Telemetry, behaviour, export, notes">⋯</button>
 
 <div id="control-block">
   <h1>ka9q-web instrument</h1>

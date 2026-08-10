@@ -27,8 +27,14 @@ export function decodeSpectrumFrame(frame) {
 
   const inputSamprate = view.getUint32(i, true); i += 4;
   i += 4; // rf_agc, not surfaced yet
-  i += 8 + 8 + 8 + 8; // input_samples, ad_over, samples_since_over, gps_time
-  i += 4 + 4 + 4 + 4; // noise_bw, rf_atten, rf_gain, rf_level_cal
+  i += 8; // input_samples, not surfaced yet
+  const adOver = Number(view.getBigUint64(i, true)); i += 8;
+  i += 8; // samples_since_over, not surfaced yet
+  i += 8; // gps_time, not surfaced yet (ns since GPS epoch - needs leap-second handling to be meaningful)
+  const noiseBwHz = view.getFloat32(i, true); i += 4;
+  const rfAttenDb = view.getFloat32(i, true); i += 4;
+  const rfGainDb = view.getFloat32(i, true); i += 4;
+  i += 4; // rf_level_cal, not surfaced yet
   const ifPowerDb = view.getFloat32(i, true); i += 4;
   i += 4; // noise_density_audio
   const zoomLevel = view.getUint32(i, true); i += 4;
@@ -41,7 +47,7 @@ export function decodeSpectrumFrame(frame) {
   const binsDb = new Float32Array(binCount);
   for (let k = 0; k < binCount; k++) binsDb[k] = binsAutorangeOffset + gain * rawBins[k];
 
-  return { binCount, centerHz, frequencyHz, binWidthHz, inputSamprate, ifPowerDb, zoomLevel, binsDb };
+  return { binCount, centerHz, frequencyHz, binWidthHz, inputSamprate, ifPowerDb, zoomLevel, binsDb, adOver, noiseBwHz, rfAttenDb, rfGainDb };
 }
 
 /**

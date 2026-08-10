@@ -47,6 +47,14 @@ test("VHF spectrum frame: 1620 bins, real 2.4Msps sample rate", () => {
   assert.equal(s.inputSamprate, 2_400_000);
 });
 
+test("VHF spectrum frame: additional telemetry fields decode as finite numbers", () => {
+  const s = firstSpectrumFrame("vhf.bin");
+  assert.ok(Number.isFinite(s.noiseBwHz));
+  assert.ok(Number.isFinite(s.rfAttenDb));
+  assert.ok(Number.isFinite(s.rfGainDb));
+  assert.ok(Number.isFinite(s.adOver) && s.adOver >= 0);
+});
+
 test("UHF spectrum frame: 1620 bins, real 20Msps sample rate", () => {
   const s = firstSpectrumFrame("uhf.bin");
   assert.equal(s.binCount, 1620);
