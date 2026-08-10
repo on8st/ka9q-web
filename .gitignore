@@ -25,3 +25,5 @@ Network Trash Folder
 Temporary Items
 # Ignore analysis / tooling outputs
 tools/
+__pycache__/
+*.pyc
