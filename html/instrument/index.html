@@ -2,30 +2,40 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>ka9q-web instrument (scaffolding)</title>
+<title>ka9q-web instrument</title>
 <style>
-  body { background: #111; color: #ddd; font-family: sans-serif; padding: 2rem; }
-  code { background: #222; padding: 0.15rem 0.4rem; border-radius: 3px; }
+  body { background: #111; color: #ddd; font-family: sans-serif; padding: 2rem; max-width: 40rem; }
+  dl { display: grid; grid-template-columns: 10rem 1fr; gap: 0.4rem 1rem; margin: 1rem 0; }
+  dt { color: #888; }
+  dd { margin: 0; }
+  input { background: #222; color: #ddd; border: 1px solid #444; padding: 0.3rem; }
+  button { padding: 0.3rem 0.8rem; }
+  ul { padding-left: 1.2rem; }
+  a { color: #6cf; }
 </style>
 </head>
 <body>
-<h1>ka9q-web instrument UI</h1>
-<p>Scaffolding only - this proves the new interface can be served from
-<code>/instrument/</code> alongside the stock page at <code>/</code>, with
-neither the stock page, its scripts, nor the C server modified. No receiver
-functionality lives here yet.</p>
-<p id="status">Checking for sibling receivers...</p>
-<script>
-fetch('instances.json', { cache: 'no-store' })
-  .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-  .then(data => {
-    document.getElementById('status').textContent =
-      'Discovered instances.json: ' + JSON.stringify(data);
-  })
-  .catch(err => {
-    document.getElementById('status').textContent =
-      'instances.json not available yet (' + err.message + ') - discovery is a later step.';
-  });
-</script>
+<h1>ka9q-web instrument</h1>
+<p id="status-line">Connection: <span id="conn-state">connecting…</span></p>
+
+<dl>
+  <dt>Front end</dt><dd id="fe-desc">—</dd>
+  <dt>Coverage</dt><dd id="fe-coverage">—</dd>
+  <dt>Signal (IF power)</dt><dd id="fe-power">—</dd>
+  <dt>Tuned frequency</dt><dd id="tuned-freq">—</dd>
+  <dt>Mode</dt><dd id="tuned-mode">—</dd>
+</dl>
+
+<form id="tune-form">
+  <label>Tune to (kHz): <input id="tune-input" type="text" inputmode="decimal" size="12"></label>
+  <button type="submit">Tune</button>
+</form>
+
+<div id="switcher" hidden>
+  <h2>Other receivers on this station</h2>
+  <ul id="switcher-list"></ul>
+</div>
+
+<script type="module" src="app.js"></script>
 </body>
 </html>

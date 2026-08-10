@@ -20,11 +20,6 @@ import {
   decodeChannelDataFields,
 } from "./status-decode.js";
 
-// The stock default channel's frequency when no real session has ever
-// tuned it - confirmed live against all three instances (2026-08-10, see
-// PROTOCOL-TEXT.md). Not a real VHF/UHF frequency; treat as "no session".
-const NO_SESSION_DEFAULT_HZ = 10_000_000;
-
 function parseBfreq(raw) {
   const v = parseFloat(raw);
   if (!Number.isFinite(v)) return null;
@@ -40,7 +35,7 @@ export class Ka9qWebClient extends EventTarget {
     this.clientId = "c" + Math.random().toString(36).slice(2, 10);
     this.seq = 0;
     this.frontend = null; // { descriptionText, frequencyHz, isReal, ifLowHz, ifHighHz, inputSamprate, ifPowerDb }
-    this.tunedFreqHz = null; // last BFREQ, raw (may be the no-session default)
+    this.tunedFreqHz = null; // last BFREQ, or null if this session has never received one (see PROTOCOL-TEXT.md - not guaranteed on connect)
     this.mode = null;
     this._fields = new Map();
     this._ws = null;
@@ -101,7 +96,7 @@ export class Ka9qWebClient extends EventTarget {
       if (hz !== null) {
         this.tunedFreqHz = hz;
         this.dispatchEvent(new CustomEvent("tunedFreq", {
-          detail: { hz, hasSession: hz !== NO_SESSION_DEFAULT_HZ, forced: args[0] === "BFREQ_FORCE" },
+          detail: { hz, forced: args[0] === "BFREQ_FORCE" },
         }));
       }
       return;

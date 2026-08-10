@@ -45,29 +45,28 @@ test("binary frame updates client.frontend and fires a frontend event", () => {
   assert.deepEqual(eventDetail, client.frontend);
 });
 
-test("BFREQ at the no-session default reports hasSession: false", () => {
+test("BFREQ below the 1e6 threshold is interpreted as kHz", () => {
   const client = new Ka9qWebClient("ws://unused/");
   let detail = null;
   client.addEventListener("tunedFreq", (e) => { detail = e.detail; });
 
-  client._onTextMessage("BFREQ:10000000.000"); // confirmed live default, PROTOCOL-TEXT.md
+  client._onTextMessage("BFREQ:14250.000"); // 14250 kHz = 14.25 MHz
 
-  assert.equal(detail.hz, 10_000_000);
-  assert.equal(detail.hasSession, false);
+  assert.equal(detail.hz, 14_250_000);
   assert.equal(detail.forced, false);
+  assert.equal(client.tunedFreqHz, 14_250_000);
 });
 
-test("BFREQ with a real tuned frequency (Hz-magnitude form) reports hasSession: true", () => {
+test("BFREQ above the 1e6 threshold is interpreted as already-Hz", () => {
   const client = new Ka9qWebClient("ws://unused/");
   let detail = null;
   client.addEventListener("tunedFreq", (e) => { detail = e.detail; });
 
-  // Confirmed live 2026-08-10 (PROTOCOL-TEXT.md): server echoes in Hz once
-  // the value exceeds the protocol's own 1e6 ambiguity threshold.
+  // Confirmed live 2026-08-10 (PROTOCOL-TEXT.md): server echoes a real tune
+  // in Hz once the value exceeds the protocol's own 1e6 ambiguity threshold.
   client._onTextMessage("BFREQ:145500000.000");
 
   assert.equal(detail.hz, 145_500_000);
-  assert.equal(detail.hasSession, true);
 });
 
 test("BFREQ_FORCE sets forced: true", () => {
