@@ -15,3 +15,15 @@ export function fmtStep(hz) {
   if (hz < 1_000_000) return `${hz / 1000} kHz`;
   return `${hz / 1_000_000} MHz`;
 }
+
+// "Alternate frequency buttons" (stock: alternate_freq_buttons, labelled
+// "Alt") - another manifest-name misnomer: it's a fixed-step override for
+// the nudge buttons plus a round-to-nearest-kHz on manual entry, not a
+// display-format toggle. Stock has two button pairs (outer ±100Hz, inner
+// ±10Hz); this UI has one step pair, so ported as the inner pair's fixed
+// target (10Hz) - the more precise, more generally useful of the two.
+export const ALT_STEP_HZ = 10;
+
+export function roundToNearestKhz(hz) {
+  return Math.round(hz / 1000) * 1000;
+}

@@ -109,6 +109,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--ui);font-size:13p
 button.k,input.k{font-family:var(--ui);font-size:12px;color:var(--text);background:var(--panel-3);border:1px solid var(--rule);border-radius:var(--r);padding:5px 10px;cursor:pointer}
 button.k:hover{border-color:var(--live);color:#fff}
 button.k.mini{padding:3px 7px;font-size:11px}
+button.k.on{background:var(--live);border-color:var(--live);color:var(--ink);font-weight:600}
 input.k{font-family:var(--mono);background:var(--ink);cursor:auto;padding:4px 7px}
 input.k.num{width:64px;text-align:right}
 input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(--live);outline-offset:1px}
@@ -167,6 +168,7 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
             <button class="sval" id="step-value">1 kHz</button>
             <button class="sar" id="step-down" title="Down one step">▼</button>
           </div>
+          <button class="k mini" id="alt-step" title="Alt: step buttons use a fixed 10Hz step, typed entry rounds to the nearest kHz">Alt</button>
         </div>
       </div>
 
@@ -198,6 +200,7 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
         <div class="prow"><span class="cap" style="min-width:52px">Range</span><button class="k mini" id="range-autoscale">Autoscale</button><button class="k mini" id="baseline-down">Floor −</button><button class="k mini" id="baseline-up">Floor +</button><button class="k mini" id="range-dec">Ceil −</button><button class="k mini" id="range-inc">Ceil +</button></div>
         <div class="prow"><span class="cap" style="min-width:52px">Colormap</span><select class="k" id="colormap-select"></select><input type="number" class="k num" id="waterfall-bias" step="1" title="Waterfall bias, decrease to lighten"></div>
         <div class="prow"><label class="chk"><input type="checkbox" id="cursor-active"> Cursor</label><label class="chk"><input type="checkbox" id="no-spectrum-fill"> No fill</label><label class="chk"><input type="checkbox" id="hide-dc-spike" checked> Hide DC spike</label></div>
+        <div class="prow"><label class="chk"><input type="checkbox" id="show-band-edges"> Show ham band edges</label></div>
       </div>
     </div>
     <div class="card"><div class="hd"><span class="silk">Filter &amp; shift</span></div>
@@ -206,6 +209,7 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
         <div class="prow"><span class="cap" style="min-width:52px">Shift</span><input type="number" class="k num" id="shift-input" step="10" placeholder="0" title="Post-detection audio offset (CW sidetone pitch)"><button class="k mini" id="shift-send">Set Shift</button></div>
         <div class="prow"><button class="k mini" id="quickbw-toggle">QuickBW</button><input type="number" class="k num" id="quickbw-lower" step="1" title="QuickBW lower offset (Hz)"><input type="number" class="k num" id="quickbw-upper" step="1" title="QuickBW upper offset (Hz)"><button class="k mini" id="quickbw-save">Save</button></div>
         <div class="prow"><label class="chk"><input type="checkbox" id="azc-enable"> AZC (keep frequency centred on click-tune)</label></div>
+        <div class="prow"><label class="chk"><input type="checkbox" id="mode-by-freq"> Switch modes by frequency (HF)</label></div>
       </div>
     </div>
     <div class="card"><div class="hd"><span class="silk">FFT &amp; hold</span></div>

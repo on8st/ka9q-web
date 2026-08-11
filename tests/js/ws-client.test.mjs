@@ -383,3 +383,29 @@ test("Channel Data FIELD_LOW_EDGE/FIELD_HIGH_EDGE populate client.filterEdges an
   assert.deepEqual(client.filterEdges, { lowHz: 50, highHz: 3000 });
   assert.deepEqual(detail, { lowHz: 50, highHz: 3000 });
 });
+
+test("Channel Data FIELD_BASEBAND_POWER/FIELD_NOISE_DENSITY/FIELD_SAMPLES_SINCE_OVER populate client.signalMetrics", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  let detail = null;
+  client.addEventListener("signalMetrics", (e) => { detail = e.detail; });
+  // Hand-built minimal Channel Data (0x7E) frame: BASEBAND_POWER(46) as
+  // linear power 0.01 (-20dB after conversion), NOISE_DENSITY(47) as
+  // -140.0 dB (already dB, no conversion), SAMPLES_SINCE_OVER(108)=1000.
+  const header = new ArrayBuffer(12);
+  new DataView(header).setUint32(0, (0x7e << 16), false);
+  const powerBytes = new Uint8Array(4);
+  new DataView(powerBytes.buffer).setFloat32(0, 0.01, false);
+  const noiseBytes = new Uint8Array(4);
+  new DataView(noiseBytes.buffer).setFloat32(0, -140.0, false);
+  const tlv = new Uint8Array([46, 4, ...powerBytes, 47, 4, ...noiseBytes, 108, 2, 0x03, 0xe8]);
+  const buf = new Uint8Array(12 + tlv.length);
+  buf.set(new Uint8Array(header), 0);
+  buf.set(tlv, 12);
+
+  client._onMessage({ data: buf.buffer });
+
+  assert.ok(Math.abs(client.signalMetrics.basebandPowerDb - (-20)) < 1e-4);
+  assert.equal(client.signalMetrics.noiseDensityDb, -140);
+  assert.equal(client.signalMetrics.samplesSinceOver, 1000);
+  assert.deepEqual(detail, client.signalMetrics);
+});

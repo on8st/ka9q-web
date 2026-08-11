@@ -22,12 +22,48 @@ export function dbToNeedleDeg(db, minDeg = MIN_NEEDLE_DEG, maxDeg = MAX_NEEDLE_D
   return minDeg + pct * (maxDeg - minDeg);
 }
 
-function renderBar(container, db) {
-  container.innerHTML = `<div class="meter-bar-track"><div class="meter-bar-fill" style="width:${dbToPercent(db).toFixed(1)}%"></div></div>`;
+// "S-meter metric" (stock: the `meter` <select>, Signal/SNR/OVR) - ported
+// from html/smeter.js's updateSMeter(). Signal reuses the existing
+// ifPowerDb path unchanged; SNR and OVR are new math over fields this UI
+// didn't previously decode (ws-client.js's signalMetrics/filterEdges).
+export const SNR_MIN_DB = -10;
+export const SNR_MAX_DB = 50;
+
+function dbToLinearPower(db) {
+  return Math.pow(10, db / 10);
 }
 
-function renderAnalog(container, db) {
-  const deg = dbToNeedleDeg(db).toFixed(1);
+/** SNR from baseband (signal+noise) power, noise density, and filter
+ * bandwidth - ported exactly from smeter.js: subtracts the noise power
+ * out of the signal+noise power before converting back to dB, floors at
+ * -100dB (stock's own floor) when the subtraction would go non-positive
+ * (i.e. no detectable signal above the noise floor). */
+export function computeSnrDb(basebandPowerDb, noiseDensityDb, bandwidthHz) {
+  const noisePower = dbToLinearPower(noiseDensityDb) * bandwidthHz;
+  const signalPlusNoisePower = dbToLinearPower(basebandPowerDb);
+  const ratio = signalPlusNoisePower / noisePower;
+  return ratio - 1 > 0 ? 10 * Math.log10(ratio - 1) : -100;
+}
+
+/** OVR is NOT a count - it's "how recently did an ADC overrange happen",
+ * decaying hyperbolically toward 0 the longer none occurs (1 right after
+ * one, 0.1 ten seconds later, etc.), ported exactly from smeter.js.
+ * Clamped to [0,1] - stock displays it as a plain 0-100% fill, not dB. */
+export function computeOvrRatio(inputSamprate, samplesSinceOver) {
+  if (!samplesSinceOver || !inputSamprate) return 0;
+  return Math.min(1, Math.max(0, inputSamprate / samplesSinceOver));
+}
+
+function percentToNeedleDeg(pct, minDeg = MIN_NEEDLE_DEG, maxDeg = MAX_NEEDLE_DEG) {
+  return minDeg + (pct / 100) * (maxDeg - minDeg);
+}
+
+function renderBar(container, pct) {
+  container.innerHTML = `<div class="meter-bar-track"><div class="meter-bar-fill" style="width:${pct.toFixed(1)}%"></div></div>`;
+}
+
+function renderAnalog(container, pct) {
+  const deg = percentToNeedleDeg(pct).toFixed(1);
   container.innerHTML = `
     <svg class="meter-analog" viewBox="0 0 100 60" width="100" height="60">
       <path d="M 10 55 A 40 40 0 0 1 90 55" fill="none" stroke="#444" stroke-width="2"/>
@@ -37,24 +73,59 @@ function renderAnalog(container, db) {
     </svg>`;
 }
 
-/** Manages which meter style is shown, persisted across reloads. render(db)
- * re-renders whichever style is currently selected - only one is ever in
- * the DOM at once, per the brief ("never a second meter"). */
+const METRIC_KEY = "instrument_meter_metric";
+export const METRICS = ["signal", "snr", "ovr"];
+
+/** Picks which value to show and maps it to a 0-100% fill, or
+ * { valid: false } if the metric's required inputs aren't available yet
+ * (e.g. SNR needs filter edges, which may not have arrived - the meter
+ * shows a placeholder rather than a wrong/stale reading). */
+function percentForMetric(metric, values) {
+  if (metric === "snr") {
+    const { basebandPowerDb, noiseDensityDb, bandwidthHz } = values;
+    if (![basebandPowerDb, noiseDensityDb, bandwidthHz].every(Number.isFinite)) return { valid: false };
+    return { valid: true, percent: dbToPercent(computeSnrDb(basebandPowerDb, noiseDensityDb, bandwidthHz), SNR_MIN_DB, SNR_MAX_DB) };
+  }
+  if (metric === "ovr") {
+    const { inputSamprate, samplesSinceOver } = values;
+    if (!Number.isFinite(inputSamprate) || !Number.isFinite(samplesSinceOver)) return { valid: false };
+    return { valid: true, percent: computeOvrRatio(inputSamprate, samplesSinceOver) * 100 };
+  }
+  if (!Number.isFinite(values.ifPowerDb)) return { valid: false };
+  return { valid: true, percent: dbToPercent(values.ifPowerDb) };
+}
+
+/** Manages which meter style AND metric are shown, both persisted across
+ * reloads - only one meter, showing one metric, is ever in the DOM at
+ * once (brief: "never a second meter"). render() accepts either a plain
+ * dB number (shorthand for {ifPowerDb: db}, the pre-existing call shape)
+ * or a values object carrying whichever of ifPowerDb/basebandPowerDb/
+ * noiseDensityDb/bandwidthHz/inputSamprate/samplesSinceOver the current
+ * metric needs. */
 export function createMeter(container) {
   let style = localStorage.getItem(STORAGE_KEY) || "bar";
-  let lastDb = null;
+  let metric = METRICS.includes(localStorage.getItem(METRIC_KEY)) ? localStorage.getItem(METRIC_KEY) : "signal";
+  let lastValues = null;
 
-  function render(db) {
-    lastDb = db;
-    if (db === null || db === undefined) { container.innerHTML = "—"; return; }
-    (style === "analog" ? renderAnalog : renderBar)(container, db);
+  function render(dbOrValues) {
+    lastValues = (typeof dbOrValues === "number") ? { ifPowerDb: dbOrValues } : (dbOrValues || {});
+    const { valid, percent } = percentForMetric(metric, lastValues);
+    if (!valid) { container.innerHTML = "—"; return; }
+    (style === "analog" ? renderAnalog : renderBar)(container, percent);
   }
 
   function setStyle(newStyle) {
     style = newStyle;
     localStorage.setItem(STORAGE_KEY, style);
-    render(lastDb);
+    render(lastValues);
   }
 
-  return { render, setStyle, getStyle: () => style };
+  function setMetric(newMetric) {
+    if (!METRICS.includes(newMetric)) return;
+    metric = newMetric;
+    localStorage.setItem(METRIC_KEY, metric);
+    render(lastValues);
+  }
+
+  return { render, setStyle, getStyle: () => style, setMetric, getMetric: () => metric };
 }

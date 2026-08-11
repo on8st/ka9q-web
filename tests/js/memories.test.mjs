@@ -12,7 +12,7 @@ globalThis.localStorage ??= (() => {
   };
 })();
 
-const { loadMemories, addMemory, deleteMemory, defaultLabel } = await import("../../html/instrument/memories.js");
+const { loadMemories, addMemory, deleteMemory, replaceMemories, defaultLabel, exportMemoriesJson, importMemoriesJson } = await import("../../html/instrument/memories.js");
 
 test("loadMemories returns [] when nothing is stored yet", () => {
   localStorage.clear();
@@ -40,4 +40,42 @@ test("deleteMemory removes exactly the indexed entry", () => {
   const after = deleteMemory(mem, 1);
   assert.deepEqual(after.map((m) => m.label), ["a", "c"]);
   assert.deepEqual(loadMemories().map((m) => m.label), ["a", "c"]);
+});
+
+test("exportMemoriesJson/importMemoriesJson round-trip this UI's own format exactly", () => {
+  const memories = [{ freqHz: 14_074_000, label: "FT8" }, { freqHz: 145_500_000, label: "2m calling" }];
+  const json = exportMemoriesJson(memories);
+  assert.deepEqual(importMemoriesJson(json), memories);
+});
+
+test("importMemoriesJson accepts a genuine stock 50-slot export, dropping empty slots and translating fields", () => {
+  const stockExport = [
+    { freq: "14195000", desc: "20m SSB", mode: "usb" },
+    { freq: "", desc: "", mode: "" }, // empty slot, ported exactly - stock always has 50, most empty
+    { freq: "7074000", desc: "", mode: "usb" }, // no desc - should fall back to defaultLabel
+  ];
+  const result = importMemoriesJson(JSON.stringify(stockExport));
+  assert.deepEqual(result, [
+    { freqHz: 14_195_000, label: "20m SSB" },
+    { freqHz: 7_074_000, label: defaultLabel(7_074_000) },
+  ]);
+});
+
+test("importMemoriesJson returns null for invalid/unrecognised JSON", () => {
+  assert.equal(importMemoriesJson("not json"), null);
+  assert.equal(importMemoriesJson("{}"), null); // not an array
+  assert.equal(importMemoriesJson(JSON.stringify([{ unrelated: true }])), null);
+});
+
+test("importMemoriesJson on an empty array returns an empty list, not null", () => {
+  assert.deepEqual(importMemoriesJson("[]"), []);
+});
+
+test("replaceMemories persists the given list wholesale (used after a successful import)", () => {
+  localStorage.clear();
+  addMemory([], 1_000_000, "stale");
+  const fresh = [{ freqHz: 14_074_000, label: "FT8" }];
+  const result = replaceMemories(fresh);
+  assert.deepEqual(result, fresh);
+  assert.deepEqual(loadMemories(), fresh);
 });

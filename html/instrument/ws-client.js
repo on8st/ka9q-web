@@ -6,6 +6,7 @@
 // reuse of radio.js's own code (see INSTRUMENT-DECISIONS.md on why this UI
 // is built this way).
 import {
+  FIELD_BASEBAND_POWER,
   FIELD_DESCRIPTION,
   FIELD_FE_HIGH_EDGE,
   FIELD_FE_ISREAL,
@@ -15,10 +16,13 @@ import {
   FIELD_IF_POWER,
   FIELD_INPUT_SAMPRATE,
   FIELD_LOW_EDGE,
+  FIELD_NOISE_DENSITY,
   FIELD_OUTPUT_CHANNELS,
   FIELD_OUTPUT_ENCODING,
   FIELD_OUTPUT_SAMPRATE,
+  FIELD_SAMPLES_SINCE_OVER,
   asBool,
+  asDbFromLinearPower,
   asFloat32,
   asFloat64,
   asText,
@@ -50,6 +54,7 @@ export class Ka9qWebClient extends EventTarget {
     this.zoomTableSize = null; // from "ZSIZE:<n>", the reply to a raw "Z:SIZE" query - number of valid zoom-table indices for this front end (radio.js's fetchZoomTableSize())
     this.filterEdges = null; // { lowHz, highHz }, from Channel Data FIELD_LOW_EDGE/FIELD_HIGH_EDGE (39/40) - confirms a sent e:<low>:<high> took effect
     this.shiftHz = null; // from the inbound "SHIFT:<hz>" text message (PROTOCOL-TEXT.md) - the post-detection audio offset, sent unconditionally on connect/change
+    this.signalMetrics = null; // { basebandPowerDb, noiseDensityDb, samplesSinceOver }, from Channel Data - the SNR/OVR S-meter metrics' raw inputs (see meter.js for the actual SNR/OVR math)
     this._fields = new Map();
     this._ws = null;
   }
@@ -260,6 +265,17 @@ export class Ka9qWebClient extends EventTarget {
         highHz: asFloat32(this._fields.get(FIELD_HIGH_EDGE)),
       };
       this.dispatchEvent(new CustomEvent("filterEdges", { detail: this.filterEdges }));
+    }
+    // Raw inputs for the "S-meter metric" feature's SNR/OVR options
+    // (Signal itself already comes from the spectrum stream's ifPowerDb -
+    // these two are demod-specific, Channel-Data-only).
+    if (this._fields.has(FIELD_BASEBAND_POWER) || this._fields.has(FIELD_NOISE_DENSITY) || this._fields.has(FIELD_SAMPLES_SINCE_OVER)) {
+      this.signalMetrics = {
+        basebandPowerDb: this._fields.has(FIELD_BASEBAND_POWER) ? asDbFromLinearPower(this._fields.get(FIELD_BASEBAND_POWER)) : null,
+        noiseDensityDb: this._fields.has(FIELD_NOISE_DENSITY) ? asFloat32(this._fields.get(FIELD_NOISE_DENSITY)) : null,
+        samplesSinceOver: this._fields.has(FIELD_SAMPLES_SINCE_OVER) ? asUint(this._fields.get(FIELD_SAMPLES_SINCE_OVER)) : null,
+      };
+      this.dispatchEvent(new CustomEvent("signalMetrics", { detail: this.signalMetrics }));
     }
   }
 

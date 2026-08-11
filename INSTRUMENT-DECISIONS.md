@@ -637,3 +637,65 @@ of everything so far to turn out client-only, and that held:
   (`edgeManualDirty`, `radio.js`) with a dirty flag per field, cleared
   only on Send rather than on blur - ported that instead of the simpler
   focus-only check for these two fields.
+
+## Memory import/export, S-meter metric, band edges, mode-by-frequency, Alt (2026-08-11)
+
+The last five parity-manifest entries. Two turned out to be manifest-name
+misnomers (again - the fourth and fifth time this build has hit that
+pattern) and one needed real data-format reconciliation:
+
+- **Memory import/export** needed a translation layer, not a straight
+  port: stock's format (`frequency_memories`, fixed 50-slot array,
+  `{freq: string-Hz, desc, mode}`) and this UI's own (`memories.js`,
+  unbounded, `{freqHz: number, label}`, no `mode` field) are genuinely
+  different shapes, on purpose (this UI's memory feature was scoped as
+  "save/recall quick-select chips," not stock's full 50-slot system -
+  see that module's own header comment). Export produces this UI's
+  native format (round-trips with itself exactly); import accepts
+  *either* that format *or* a genuine stock export (dropping empty
+  slots, translating fields, discarding `mode` since there's no field to
+  put it in) for interop between the two UIs on the same station.
+- **"S-meter metric"** needed real new decoding, not just a UI switch:
+  Signal already worked (`ifPowerDb`), but SNR and OVR both needed fields
+  this UI had never decoded before - `FIELD_BASEBAND_POWER` (46, arrives
+  as *linear* power unlike every other power field in this protocol - a
+  new `asDbFromLinearPower()` helper) and `FIELD_NOISE_DENSITY` (47) for
+  SNR; `FIELD_SAMPLES_SINCE_OVER` (108) for OVR, which is **not a count**
+  - it's `inputSamprate / samplesSinceOver`, decaying hyperbolically
+  toward 0 the longer no overrange occurs (1.0 right after one, 0.1 ten
+  seconds later), ported exactly from `smeter.js`, not the more obvious
+  but wrong guess of "count of overranges." `meter.js`'s `render()` stays
+  backward-compatible with its original plain-number call shape
+  (`render(-40)` still means Signal) while also accepting a values object
+  for the new metrics - didn't want to break the meter-style tests
+  already covering the old shape for a feature that's additive to it.
+- **Band edge markers** needed a new data table
+  (`band-edges.js`/`HAM_BAND_EDGES`) - confirmed `band-options.js`'s
+  existing chip data (single center frequencies, no edges, missing
+  several bands, collapses 60m's five channels into one) isn't reusable
+  for this; ported stock's separate `getHamBands()` table verbatim
+  instead, simplified by dropping its inward-pointing arrow glyphs (the
+  edge lines + label already communicate the boundary).
+- **`cksbFrequency`** ("Status-bar frequency display" in the manifest) is
+  actually **"Switch Modes by Frequency"** - an HF auto-mode-select on
+  programmatic tuning from a hardcoded band table, nothing to do with a
+  status bar. Ported faithfully to what it does (`mode-by-frequency.js`),
+  applied to click-to-tune and band-select (both programmatic) but not
+  typed entry or step nudges (user-driven) or memory recall (stock
+  itself skips auto-switch there too, in favour of a stored per-memory
+  mode - this UI's memories don't have that field, so the net effect
+  matches: recall never triggers it, for a different but compatible
+  reason).
+- **`alternate_freq_buttons`** ("Alternate frequency display" in the
+  manifest) is actually the **"Alt" step-button/entry-rounding
+  toggle** - no display-format change at all. Simplified from stock's
+  two button pairs (±100Hz outer, ±10Hz inner) to this UI's one step
+  pair, using the more precise 10Hz target; also simplified by applying
+  the round-to-nearest-kHz to both digit-click nudges and typed entry
+  alike (stock only rounds the latter) rather than splitting
+  `freq-digits.js`'s single shared commit callback for a rarely-used,
+  even-in-stock-unpersisted toggle.
+
+**Parity manifest: 43/43 - every stock feature is now reachable in this
+instrument UI.** `tests/check-parity.mjs` confirms 0 manifest errors, 0
+features remaining unbuilt.

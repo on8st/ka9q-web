@@ -6,6 +6,8 @@
 // canvas painting is explicitly throwaway (brief section 2); this reads
 // real decoded data instead of the mockup's illustrative random noise.
 
+import { bandEdgesInSpan } from "./band-edges.js";
+
 const HEATMAP_STOPS = [
   [0, 0, 0],
   [0, 0, 180],
@@ -325,6 +327,10 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   function setHideDcSpike(v) { hideDcSpike = !!v; }
   function setFrontendFrequencyHz(hz) { frontendFrequencyHz = hz; }
 
+  // "Show ham band edge markers" - see band-edges.js for the table.
+  let showBandEdges = false;
+  function setShowBandEdges(v) { showBandEdges = !!v; if (!paused) draw(); }
+
   // "Cursor" - a display-only frequency marker (distinct from tuning),
   // ported from spectrum.js's cursor_active/cursor_freq/drawCursor().
   let cursorActive = false;
@@ -571,6 +577,41 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
       const hz = hzForPixel(x, w, centerHz, binWidthHz, binCount);
       ctx.fillText(fmtAxisLabel(hz), x - 16 * dpr, splitY - 4 * dpr);
     }
+
+    // "Show ham band edge markers" - ported from spectrum.js's
+    // updateAxes()/getHamBands(): a bright green line at each edge of
+    // every band overlapping the displayed span, full trace height, plus
+    // a centered label when there's room. Simplified from stock's own
+    // version by dropping its separate inward-pointing arrow glyphs -
+    // the edge lines plus label already communicate the same boundary.
+    if (showBandEdges) {
+      const spanHz = binWidthHz * binCount;
+      const startHz = centerHz - spanHz / 2;
+      const endHz = centerHz + spanHz / 2;
+      ctx.strokeStyle = "rgba(0,255,0,1.0)";
+      ctx.fillStyle = "#00ff00";
+      ctx.lineWidth = 1.2;
+      ctx.font = `${9 * dpr}px ui-monospace,monospace`;
+      for (const band of bandEdgesInSpan(startHz, endHz)) {
+        const xLow = pixelForHz(Math.max(band.lowHz, startHz), w, centerHz, binWidthHz, binCount);
+        const xHigh = pixelForHz(Math.min(band.highHz, endHz), w, centerHz, binWidthHz, binCount);
+        if (xLow !== null) {
+          ctx.beginPath();
+          ctx.moveTo(xLow, 0);
+          ctx.lineTo(xLow, h);
+          ctx.stroke();
+        }
+        if (xHigh !== null && band.highHz <= endHz) {
+          ctx.beginPath();
+          ctx.moveTo(xHigh, 0);
+          ctx.lineTo(xHigh, h);
+          ctx.stroke();
+        }
+        if (xLow !== null && xHigh !== null && xHigh - xLow > 40 * dpr) {
+          ctx.fillText(band.label, (xLow + xHigh) / 2 - (band.label.length * 3 * dpr), 12 * dpr);
+        }
+      }
+    }
   }
 
   return {
@@ -621,6 +662,8 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     isCursorActive: () => cursorActive,
     setCursorFreqHz,
     getCursorFreqHz: () => cursorFreqHz,
+    setShowBandEdges,
+    isShowBandEdges: () => showBandEdges,
     canvas,
   };
 }

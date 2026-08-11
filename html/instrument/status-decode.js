@@ -28,6 +28,9 @@ export const FIELD_OUTPUT_CHANNELS = 49;
 export const FIELD_OUTPUT_ENCODING = 107;
 export const FIELD_LOW_EDGE = 39; // demod filter low edge (Hz offset from carrier) - distinct from FIELD_FE_LOW_EDGE (100), the front end's IF window
 export const FIELD_HIGH_EDGE = 40;
+export const FIELD_BASEBAND_POWER = 46; // linear power (needs log10*10 conversion - see asDbFromLinearPower) - the "S-meter metric: Signal" input
+export const FIELD_NOISE_DENSITY = 47; // already in dB, no conversion
+export const FIELD_SAMPLES_SINCE_OVER = 108; // uint - the "S-meter metric: OVR" input (radio.js's samples_since_over)
 
 /**
  * Returns a Map of field_id -> Uint8Array for every TLV field in this
@@ -83,6 +86,14 @@ export function asFloat32(bytes) {
   if (!bytes || bytes.length > 4) return null;
   const padded = leftPad(bytes, 4);
   return new DataView(padded.buffer).getFloat32(0, false);
+}
+
+/** FIELD_BASEBAND_POWER arrives as linear power, unlike every other power
+ * field in this protocol (already dB) - ported from radio.js's own
+ * `power = 10.0 * Math.log10(power)` conversion. */
+export function asDbFromLinearPower(bytes) {
+  const linear = asFloat32(bytes);
+  return linear === null ? null : 10 * Math.log10(linear);
 }
 
 export function asUint(bytes) {

@@ -6,9 +6,10 @@
 import { Ka9qWebClient } from "./ws-client.js";
 import { createDigitDisplay } from "./freq-digits.js";
 import { createValuePanel } from "./value-panel.js";
-import { STEP_OPTIONS_HZ, applyStep, fmtStep } from "./tune-step.js";
+import { STEP_OPTIONS_HZ, applyStep, fmtStep, ALT_STEP_HZ, roundToNearestKhz } from "./tune-step.js";
+import { modeForFrequency } from "./mode-by-frequency.js";
 import { bandsInCoverage, BAND_OPTIONS } from "./band-options.js";
-import { loadMemories, addMemory, deleteMemory } from "./memories.js";
+import { loadMemories, addMemory, deleteMemory, replaceMemories, exportMemoriesJson, importMemoriesJson } from "./memories.js";
 import { createMeter } from "./meter.js";
 import { createSpectrumDisplay, COLORMAP_NAMES } from "./spectrum-canvas.js";
 import { absoluteCenterHz } from "./spectrum-decode.js";
@@ -33,6 +34,28 @@ const client = new Ka9qWebClient(
   (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/",
 ).connect();
 
+// "Switch modes by frequency" (stock: cksbFrequency - a manifest-name
+// misnomer, see mode-by-frequency.js) - applied to programmatic tuning
+// (click-to-tune, band select, memory recall), not user-typed entry or
+// manual step nudges, matching stock's own "don't override the user"
+// guard as closely as this UI's simpler tune() call sites allow.
+let modeByFreqEnabled = false;
+function maybeAutoSwitchMode(hz) {
+  if (!modeByFreqEnabled) return;
+  const mode = modeForFrequency(hz);
+  if (mode && mode !== client.mode) client.setMode(mode);
+}
+
+// "Alternate frequency buttons" (stock: alternate_freq_buttons - another
+// manifest-name misnomer, see tune-step.js) - declared early since both
+// the digit display's typed-entry commit and the step buttons below
+// reference it. No persistence in stock either, resets every reload.
+// Simplified: applies the round-to-nearest-kHz to both typed entry and
+// digit-click nudges alike (stock only rounds typed "Set" entry) - a
+// single onStep callback handles both paths in this UI's freq-digits.js,
+// and splitting them for this rarely-used toggle wasn't worth a new API.
+let altStepEnabled = false;
+
 // ---- Spectrum/waterfall: fills #display-area, per "the receiver fills
 // the screen" (brief section 4). ----
 let azcEnabled = false; // "Keep frequency centred" - declared before
@@ -41,26 +64,60 @@ const spectrumDisplay = createSpectrumDisplay($("display-area"), {
   onTune: (hz) => {
     client.tune(hz);
     if (azcEnabled) client.zoomCenter(hz);
+    maybeAutoSwitchMode(hz);
   },
 });
 client.addEventListener("spectrum", (e) => {
   const abs = absoluteCenterHz(e.detail, frontendFrequencyHz);
   spectrumDisplay.render({ ...e.detail, centerHz: abs });
+  lastInputSamprate = e.detail.inputSamprate;
+  renderMeterNow(); // OVR decays moment-to-moment - refresh every frame, not just on frontend/signalMetrics updates
 });
+client.addEventListener("signalMetrics", () => renderMeterNow());
+client.addEventListener("filterEdges", () => renderMeterNow());
 
 client.addEventListener("open", () => {});
 client.addEventListener("close", () => {});
 
 // ---- Meter segment ----
 const meter = createMeter($("fe-power"));
+let lastInputSamprate = null;
+
+// "S-meter metric" (Signal/SNR/OVR) needs several independently-arriving
+// pieces (frontend's ifPowerDb, signalMetrics' basebandPowerDb/
+// noiseDensityDb/samplesSinceOver, filterEdges' bandwidth, and
+// inputSamprate from the spectrum stream) - re-render from whichever
+// arrived most recently each time any one of them updates.
+function renderMeterNow() {
+  const fe = client.frontend;
+  const sm = client.signalMetrics;
+  const edges = client.filterEdges;
+  meter.render({
+    ifPowerDb: fe ? fe.ifPowerDb : null,
+    basebandPowerDb: sm ? sm.basebandPowerDb : null,
+    noiseDensityDb: sm ? sm.noiseDensityDb : null,
+    bandwidthHz: edges ? Math.abs(edges.highHz - edges.lowHz) : null,
+    inputSamprate: lastInputSamprate,
+    samplesSinceOver: sm ? sm.samplesSinceOver : null,
+  });
+}
+
 createValuePanel($("sgm-meter"), (panel, close) => {
   panel.innerHTML = `
     <div class="pop-head"><span>Meter</span><span>reads signal</span></div>
     <div class="pop-body">
       <label class="chk"><input type="checkbox" id="ck-analog" ${meter.getStyle() === "analog" ? "checked" : ""}> Analog meter in the readout</label>
+      <div class="chips g4" id="meter-metric-chips">${["signal", "snr", "ovr"].map((m) => `<span class="chip${m === meter.getMetric() ? " on" : ""}" data-metric="${m}">${m.toUpperCase()}</span>`).join("")}</div>
     </div>`;
   panel.querySelector("#ck-analog").addEventListener("change", (e) => {
     meter.setStyle(e.target.checked ? "analog" : "bar");
+  });
+  panel.addEventListener("click", (e) => {
+    const m = e.target.dataset.metric;
+    if (!m) return;
+    meter.setMetric(m);
+    renderMeterNow();
+    close();
   });
 });
 
@@ -116,13 +173,13 @@ client.addEventListener("frontend", (e) => {
   spectrumDisplay.setFrontendFrequencyHz(frontendFrequencyHz);
   $("ident-fe").textContent = "· " + (fe.descriptionText || "unknown front end");
   currentCoverage = { lowHz: fe.frequencyHz + (fe.ifLowHz ?? 0), highHz: fe.frequencyHz + (fe.ifHighHz ?? 0) };
-  meter.render(fe.ifPowerDb);
+  renderMeterNow();
   updateSelfEntry(fe);
   renderBandCategories();
 });
 
 // ---- Frequency digits + step spinner ----
-const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => client.tune(newHz));
+const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => client.tune(altStepEnabled ? roundToNearestKhz(newHz) : newHz));
 
 client.addEventListener("tunedFreq", (e) => {
   const { hz } = e.detail;
@@ -132,11 +189,15 @@ client.addEventListener("tunedFreq", (e) => {
 });
 
 $("step-value").textContent = fmtStep(stepHz);
+$("alt-step").addEventListener("click", () => {
+  altStepEnabled = !altStepEnabled;
+  $("alt-step").classList.toggle("on", altStepEnabled);
+});
 $("step-up").addEventListener("click", () => {
-  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, stepHz, 1));
+  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, altStepEnabled ? ALT_STEP_HZ : stepHz, 1));
 });
 $("step-down").addEventListener("click", () => {
-  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, stepHz, -1));
+  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, altStepEnabled ? ALT_STEP_HZ : stepHz, -1));
 });
 createValuePanel($("step-value"), (panel, close) => {
   panel.innerHTML = `
@@ -201,6 +262,7 @@ createValuePanel($("sgm-band"), (panel, close) => {
     if (!freq) return;
     $("v-band").textContent = e.target.textContent;
     client.tune(Number(freq));
+    maybeAutoSwitchMode(Number(freq));
     close();
   });
 });
@@ -217,6 +279,7 @@ createValuePanel($("sgm-mem"), (panel, close) => {
         <div class="mem" data-recall="${i}"><span class="n">${i + 1}</span><span><span class="f">${fmtMHz(m.freqHz)}</span> <span class="m">${m.label}</span></span><span class="m" data-delete="${i}">✕</span></div>
       `).join("")}</div>
       <div class="prow"><button class="k mini" id="mem-save">Save current frequency</button></div>
+      <div class="prow"><button class="k mini" id="mem-export">Export</button><button class="k mini" id="mem-import">Import</button><input type="file" id="mem-import-file" accept="application/json" hidden></div>
     </div>`;
   panel.querySelector("#mem-list").addEventListener("click", (e) => {
     const recall = e.target.closest("[data-recall]");
@@ -235,6 +298,27 @@ createValuePanel($("sgm-mem"), (panel, close) => {
     memories = addMemory(memories, currentFreqHz);
     $("v-mem").textContent = String(memories.length);
     close();
+  });
+  panel.querySelector("#mem-export").addEventListener("click", () => {
+    const blob = new Blob([exportMemoriesJson(memories)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `instrument_memories_${location.hostname.replace(/:/g, "_")}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  const importInput = panel.querySelector("#mem-import-file");
+  panel.querySelector("#mem-import").addEventListener("click", () => importInput.click());
+  importInput.addEventListener("change", () => {
+    const file = importInput.files[0];
+    if (!file) return;
+    file.text().then((text) => {
+      const imported = importMemoriesJson(text);
+      if (imported === null) { alert("Invalid channel memories file."); return; }
+      memories = replaceMemories(imported);
+      $("v-mem").textContent = String(memories.length);
+      close();
+    });
   });
 });
 
@@ -452,6 +536,9 @@ $("quickbw-save").addEventListener("click", () => {
 });
 
 $("azc-enable").addEventListener("change", (e) => { azcEnabled = e.target.checked; });
+$("mode-by-freq").addEventListener("change", (e) => { modeByFreqEnabled = e.target.checked; });
+$("show-band-edges").checked = spectrumDisplay.isShowBandEdges();
+$("show-band-edges").addEventListener("change", (e) => spectrumDisplay.setShowBandEdges(e.target.checked));
 
 function renderTelemetry() {
   const s = spectrumDisplay.getLastSpectrum();
