@@ -3280,6 +3280,9 @@ void *spectrum_thread(void *arg) {
       pthread_mutex_lock(&session_mutex);
       if (!sp->default_view_retro_checked) {
         sp->default_view_retro_checked = true;
+        fprintf(stderr, "SSRC %u: retroactive default-view check firing (Frontend.frequency=%.3f, "
+                "sp->frequency=%u, sp->center_frequency=%u, last_client_command_ms=%lu)\n",
+                sp->ssrc, Frontend.frequency, sp->frequency, sp->center_frequency, sp->last_client_command_ms);
         /* Never overwrite a frequency/view the user has since chosen for
            themselves - only fix up a session that's still sitting on the
            untouched creation-time defaults. */
@@ -3289,9 +3292,12 @@ void *spectrum_thread(void *arg) {
           int64_t const lo_bound = (int64_t)round(Frontend.frequency + lo_if);
           int64_t const hi_bound = (int64_t)round(Frontend.frequency + hi_if);
           bool retuned = false;
+          fprintf(stderr, "SSRC %u: retroactive check: lo_bound=%lld hi_bound=%lld\n",
+                  sp->ssrc, (long long)lo_bound, (long long)hi_bound);
           if (hi_bound > lo_bound && (sp->frequency < lo_bound || sp->frequency > hi_bound)) {
             sp->frequency = (uint32_t)round((lo_bound + hi_bound) / 2.0);
             retuned = true;
+            fprintf(stderr, "SSRC %u: retroactive check: retuning frequency to %u\n", sp->ssrc, sp->frequency);
           }
           if (sp->center_frequency == 0) {
             sp->center_frequency = (uint32_t)round(Frontend.frequency + (lo_if + hi_if) / 2.0);
