@@ -9,6 +9,7 @@ import { createValuePanel } from "./value-panel.js";
 import { STEP_OPTIONS_HZ, applyStep, fmtStep, ALT_STEP_HZ, roundToNearestKhz, snapToStep } from "./tune-step.js";
 import { modeForFrequency } from "./mode-by-frequency.js";
 import { bandsInCoverage, BAND_OPTIONS } from "./band-options.js";
+import { bandForFrequency } from "./band-edges.js";
 import { loadMemories, addMemory, deleteMemory, replaceMemories, exportMemoriesJson, importMemoriesJson } from "./memories.js";
 import { createMeter } from "./meter.js";
 import { createSpectrumDisplay, COLORMAP_NAMES } from "./spectrum-canvas.js";
@@ -212,6 +213,16 @@ client.addEventListener("tunedFreq", (e) => {
   currentFreqHz = hz;
   digitDisplay.render(hz);
   spectrumDisplay.setTunedFreqHz(hz);
+  // Single choke point for every real frequency change (page load's
+  // initial server echo, click-to-tune, band select, memory recall, step
+  // buttons, typed entry) - band label and mode-by-frequency used to only
+  // update from a couple of the manual-tune call sites, so the BAND
+  // segment showed "—" forever on a fresh page load and other paths
+  // (step buttons, memory recall) never triggered mode-by-frequency at
+  // all. Reported live (2026-08-11).
+  const band = bandForFrequency(hz);
+  $("v-band").textContent = band ? band.label.toUpperCase() : "FULL BAND";
+  maybeAutoSwitchMode(hz);
 });
 
 $("step-value").textContent = fmtStep(stepHz);
@@ -286,7 +297,12 @@ createValuePanel($("sgm-band"), (panel, close) => {
   panel.querySelector("#band-chips").addEventListener("click", (e) => {
     const freq = e.target.dataset.freq;
     if (!freq) return;
-    $("v-band").textContent = e.target.textContent;
+    // v-band is NOT set here - the central tunedFreq handler (below)
+    // recomputes it from the confirmed frequency once the server echoes
+    // it back, which is the single source of truth. Setting it here too
+    // would show this chip's own label only to have it immediately
+    // overwritten - fine for "2M"/"70CM" where the two agree, but wrong
+    // for e.g. a WWV quick-tune, which isn't inside any specific ham band.
     client.tune(Number(freq));
     maybeAutoSwitchMode(Number(freq));
     close();

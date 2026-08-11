@@ -58,8 +58,17 @@ function percentToNeedleDeg(pct, minDeg = MIN_NEEDLE_DEG, maxDeg = MAX_NEEDLE_DE
   return minDeg + (pct / 100) * (maxDeg - minDeg);
 }
 
+// Reuses .minibar/<i> - the only CSS actually defined for a bar meter
+// (index.html). This used to generate its own .meter-bar-track/
+// .meter-bar-fill markup, but no CSS for those classes was ever written
+// (a static, unrelated .minibar element elsewhere in the DOM had the
+// real styling, never wired to this module) - the bar rendered with no
+// width/height/background at all, effectively invisible, while the
+// analog meter's inline SVG attributes made it self-contained and
+// unaffected. Reported live as "the non-analog meter doesn't work"
+// (2026-08-11).
 function renderBar(container, pct) {
-  container.innerHTML = `<div class="meter-bar-track"><div class="meter-bar-fill" style="width:${pct.toFixed(1)}%"></div></div>`;
+  container.innerHTML = `<div class="minibar"><i style="width:${pct.toFixed(1)}%"></i></div>`;
 }
 
 function renderAnalog(container, pct) {

@@ -34,3 +34,12 @@ export const HAM_BAND_EDGES = [
 export function bandEdgesInSpan(lowHz, highHz) {
   return HAM_BAND_EDGES.filter((b) => b.highHz >= lowHz && b.lowHz <= highHz);
 }
+
+/** Which single band the tuned frequency falls inside, if any - drives
+ * the BAND segment's label. Returns null when the frequency isn't inside
+ * any known ham band (e.g. HF's WWV/broadcast defaults, or a receiver
+ * whose coverage doesn't line up with a specific allocation) - the
+ * caller falls back to a generic "Full band" label in that case. */
+export function bandForFrequency(hz) {
+  return HAM_BAND_EDGES.find((b) => hz >= b.lowHz && hz <= b.highHz) || null;
+}

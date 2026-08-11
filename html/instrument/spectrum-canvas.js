@@ -159,8 +159,15 @@ export function loadSpectrumPercent(storage = localStorage) {
 // added to the floor (minDb) used for the WATERFALL's colour mapping
 // only, not the trace (ported exactly: html/spectrum.js's setRange()
 // computes wf_min_db = min_db + waterfallBias while the trace keeps
-// min_db unmodified). Default 5, matching stock's Spectrum constructor.
-export const WATERFALL_BIAS_DEFAULT = 5;
+// min_db unmodified). RAISING this value raises the effective floor,
+// which crushes MORE of the low-end noise to the colormap's darkest
+// stop - the opposite of "brighter". Stock's own default is +5; lowered
+// here to -10 after live feedback that the waterfall looked washed
+// out/dim throughout (2026-08-11) - a lower floor means less of the real
+// signal clips to black, so typical noise-floor level now reads as a
+// visibly lit colour instead of near-black. Still fully adjustable via
+// the waterfall context menu's Bias control, which persists per user.
+export const WATERFALL_BIAS_DEFAULT = -10;
 const WATERFALL_BIAS_KEY = "instrument_waterfall_bias";
 const COLORMAP_INDEX_KEY = "instrument_colormap_index";
 

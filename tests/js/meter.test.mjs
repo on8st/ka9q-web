@@ -38,7 +38,10 @@ test("createMeter defaults to bar style and renders a fill width", () => {
   const meter = createMeter(el);
   assert.equal(meter.getStyle(), "bar");
   meter.render(-40);
-  assert.match(el.innerHTML, /meter-bar-fill/);
+  // .minibar/<i> - the only bar markup with real CSS behind it (see
+  // meter.js's renderBar() header comment: the old .meter-bar-fill
+  // classes had no matching CSS anywhere, rendering invisible).
+  assert.match(el.innerHTML, /minibar/);
   assert.match(el.innerHTML, /width:50\.0%/);
 });
 
@@ -49,7 +52,7 @@ test("setStyle switches to analog and re-renders the last value, never both at o
   meter.setStyle("analog");
   assert.equal(meter.getStyle(), "analog");
   assert.match(el.innerHTML, /meter-analog/);
-  assert.doesNotMatch(el.innerHTML, /meter-bar-fill/);
+  assert.doesNotMatch(el.innerHTML, /minibar/);
 });
 
 test("meter style choice persists via localStorage across instances", () => {
@@ -107,7 +110,7 @@ test("render() with SNR metric selected computes from basebandPowerDb/noiseDensi
   const meter = createMeter(el);
   meter.setMetric("snr");
   meter.render({ basebandPowerDb: -100, noiseDensityDb: -140, bandwidthHz: 1 });
-  assert.match(el.innerHTML, /meter-bar-fill/);
+  assert.match(el.innerHTML, /minibar/);
   assert.doesNotMatch(el.innerHTML, /—/);
 });
 
