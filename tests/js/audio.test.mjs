@@ -7,18 +7,22 @@ import assert from "node:assert/strict";
 // that record calls instead of touching real audio hardware/WASM.
 globalThis.window ??= globalThis;
 
+let lastCreatedPlayer = null;
 class FakePCMPlayer {
   constructor(option) {
     this.option = option;
+    lastCreatedPlayer = this;
     this.audioCtx = { state: "running" };
     this.fed = [];
     this.volumeValue = null;
+    this.panValue = null;
     this.destroyed = false;
     this.recording = false;
     this.recordedArgs = null;
   }
   feed(data) { this.fed.push(data); }
   volume(v) { this.volumeValue = v; }
+  pan(v) { this.panValue = v; }
   resume() { this.audioCtx.state = "running"; }
   destroy() { this.destroyed = true; }
   startRecording() { this.recording = true; }
@@ -147,4 +151,14 @@ test("an Opus audioFrame is decoded and interleaved before being fed to the play
   await player.start();
   // Should not throw even though the fake decoder returns synthetic data.
   assert.doesNotThrow(() => client._fire("audioFrame", { encoding: "opus", payload: new Uint8Array([1, 2, 3]) }));
+});
+
+test("setPan() applies to the current player, and to a freshly-created one ('panner_control', pcm-player.js's StereoPannerNode)", async () => {
+  const client = fakeClient();
+  const player = createAudioPlayer(client);
+  player.setPan(0.5);
+  await player.start(); // PCM player created here - should pick up the pan set before start
+  assert.equal(lastCreatedPlayer.panValue, 0.5);
+  player.setPan(-0.3);
+  assert.equal(lastCreatedPlayer.panValue, -0.3);
 });

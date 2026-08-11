@@ -99,6 +99,39 @@ function fmtAxisLabel(hz) {
   return (hz / 1e6).toFixed(3);
 }
 
+/** Which bin index a given absolute frequency falls in (not clamped to
+ * the display width, unlike binIndexForPixel - used for "Hide DC spike",
+ * which needs the bin index directly, not a pixel column). */
+export function hzToBinIndex(hz, absCenterHz, binWidthHz, binCount) {
+  const spanHz = binWidthHz * binCount;
+  const startHz = absCenterHz - spanHz / 2;
+  return Math.round(((hz - startHz) / spanHz) * binCount);
+}
+
+// "Hide DC/centre-bin spike" (this fork's own stock feature,
+// ckHideDcSpike) - cosmetic-only linear interpolation over the front
+// end's own LO-leakage spike, ported exactly from spectrum.js's
+// interpolateDcSpike(): a halfWidth=2 window (5 bins) around the DC bin,
+// interpolated between the two real bins just outside it. Returns the
+// input unchanged (no copy) whenever there's nothing to do, so callers
+// never need to null-check - same contract as stock.
+export function interpolateDcSpike(binsDb, dcBinIndex) {
+  if (!binsDb || !binsDb.length) return binsDb;
+  const halfWidth = 2;
+  const lo = dcBinIndex - halfWidth;
+  const hi = dcBinIndex + halfWidth;
+  if (lo - 1 < 0 || hi + 1 >= binsDb.length) return binsDb;
+  const leftVal = binsDb[lo - 1];
+  const rightVal = binsDb[hi + 1];
+  if (!Number.isFinite(leftVal) || !Number.isFinite(rightVal)) return binsDb;
+  const out = binsDb.slice();
+  const span = (hi + 1) - (lo - 1);
+  for (let i = lo; i <= hi; i++) {
+    out[i] = leftVal + (rightVal - leftVal) * ((i - (lo - 1)) / span);
+  }
+  return out;
+}
+
 // "Spectrum display size" (stock: spectrum_size_up/spectrum_size_down,
 // html/spectrum.js's incrementSpectrumPercent()/decrementSpectrumPercent())
 // is purely a local trace/waterfall split ratio - confirmed no WS traffic
@@ -278,10 +311,45 @@ export function createSpectrumDisplay(container) {
   function setShowMaxTrace(v) { showMaxTrace = !!v; if (!paused) draw(); }
   function setShowMinTrace(v) { showMinTrace = !!v; if (!paused) draw(); }
 
-  /** Applies FFT averaging then, if enabled, updates the max/min-hold
-   * arrays - once per incoming frame, before drawing. Returns the bins
-   * the trace/waterfall should actually render (the averaged ones). */
-  function processFrame(binsDb) {
+  // "Spectrum fill style" (ckNoSpectrumFill) - gates only the live
+  // trace's under-curve fill, not its stroke, matching stock exactly
+  // (max/min hold traces are never filled in stock either way).
+  let noFill = false;
+  function setNoFill(v) { noFill = !!v; if (!paused) draw(); }
+
+  // "Hide DC/centre-bin spike" - needs the front end's real tuned centre
+  // (FIRST_LO_FREQUENCY, same field the frequency-offset fix already
+  // needed - see PROTOCOL-SPECTRUM.md) to know which bin is DC.
+  let hideDcSpike = true; // stock default
+  let frontendFrequencyHz = null;
+  function setHideDcSpike(v) { hideDcSpike = !!v; }
+  function setFrontendFrequencyHz(hz) { frontendFrequencyHz = hz; }
+
+  // "Cursor" - a display-only frequency marker (distinct from tuning),
+  // ported from spectrum.js's cursor_active/cursor_freq/drawCursor().
+  let cursorActive = false;
+  let cursorFreqHz = null;
+  function setCursorActive(v) { cursorActive = !!v; if (!paused) draw(); }
+  function setCursorFreqHz(hz) { cursorFreqHz = hz; if (!paused) draw(); }
+  canvas.addEventListener("click", (e) => {
+    if (!cursorActive || !lastSpectrum) return;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    const x = (e.clientX - rect.left) * dpr;
+    const hz = hzForPixel(x, canvas.width, lastSpectrum.centerHz, lastSpectrum.binWidthHz, lastSpectrum.binCount);
+    setCursorFreqHz(hz);
+  });
+
+  /** Applies DC-spike interpolation (cosmetic only) then FFT averaging,
+   * then, if enabled, updates the max/min-hold arrays - once per
+   * incoming frame, before drawing. Returns the bins the trace/waterfall
+   * should actually render. */
+  function processFrame(spectrum) {
+    let binsDb = spectrum.binsDb;
+    if (hideDcSpike && typeof frontendFrequencyHz === "number" && frontendFrequencyHz > 0) {
+      const dcBin = hzToBinIndex(frontendFrequencyHz, spectrum.centerHz, spectrum.binWidthHz, spectrum.binCount);
+      binsDb = interpolateDcSpike(binsDb, dcBin);
+    }
     if (!binsAverage || binsAverage.length !== binsDb.length) {
       binsAverage = Float32Array.from(binsDb);
     } else {
@@ -408,17 +476,21 @@ export function createSpectrumDisplay(container) {
     // look). "Live" trace visibility (check_live) - drawn regardless of
     // maxHoldEnabled, matching stock exactly (only Max/Min are gated by it).
     if (showLive) {
-      ctx.beginPath();
-      ctx.moveTo(0, splitY);
-      for (let x = 0; x < w; x++) {
-        const db = binsDb[binIndexForPixel(x, w, binCount)];
-        const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
-        ctx.lineTo(x, splitY - t * (splitY - 14));
+      // "Spectrum fill style" (ckNoSpectrumFill) - only skips the fill,
+      // the stroke below always draws (matches stock exactly).
+      if (!noFill) {
+        ctx.beginPath();
+        ctx.moveTo(0, splitY);
+        for (let x = 0; x < w; x++) {
+          const db = binsDb[binIndexForPixel(x, w, binCount)];
+          const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
+          ctx.lineTo(x, splitY - t * (splitY - 14));
+        }
+        ctx.lineTo(w, splitY);
+        ctx.closePath();
+        ctx.fillStyle = "rgba(75,224,138,0.10)";
+        ctx.fill();
       }
-      ctx.lineTo(w, splitY);
-      ctx.closePath();
-      ctx.fillStyle = "rgba(75,224,138,0.10)";
-      ctx.fill();
       ctx.beginPath();
       for (let x = 0; x < w; x++) {
         const db = binsDb[binIndexForPixel(x, w, binCount)];
@@ -448,6 +520,21 @@ export function createSpectrumDisplay(container) {
     }
     if (maxHoldEnabled && showMaxTrace && binsMax) strokeHoldTrace(binsMax, "#ffff00");
     if (maxHoldEnabled && showMinTrace && binsMin) strokeHoldTrace(binsMin, "#ff0000");
+
+    // "Cursor" - a display-only frequency marker, ported from
+    // spectrum.js's drawCursor(). Independent of the tuned-frequency band
+    // above (different colour, different purpose - a movable reference
+    // point vs. the actual receive frequency).
+    if (cursorActive && cursorFreqHz !== null) {
+      const x = pixelForHz(cursorFreqHz, w, centerHz, binWidthHz, binCount);
+      if (x !== null) {
+        ctx.strokeStyle = "#00ffff";
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, splitY);
+        ctx.stroke();
+      }
+    }
 
     // Tuned-frequency band, spanning the full height (matches the mockup).
     if (tunedFreqHz !== null) {
@@ -483,7 +570,7 @@ export function createSpectrumDisplay(container) {
     render: (spectrum) => {
       lastSpectrum = spectrum;
       updateAutorange(spectrum.binsDb);
-      processFrame(spectrum.binsDb); // once per real frame only - draw() must never re-run this (see its own call sites)
+      processFrame(spectrum); // once per real frame only - draw() must never re-run this (see its own call sites)
       if (!paused) draw();
     },
     resize,
@@ -518,6 +605,15 @@ export function createSpectrumDisplay(container) {
     setShowLive,
     setShowMaxTrace,
     setShowMinTrace,
+    setNoFill,
+    isNoFill: () => noFill,
+    setHideDcSpike,
+    isHideDcSpike: () => hideDcSpike,
+    setFrontendFrequencyHz,
+    setCursorActive,
+    isCursorActive: () => cursorActive,
+    setCursorFreqHz,
+    getCursorFreqHz: () => cursorFreqHz,
     canvas,
   };
 }

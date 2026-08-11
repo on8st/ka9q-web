@@ -7,6 +7,7 @@ import {
   loadSpectrumPercent, loadWaterfallBias, loadColorIndex,
   SPECTRUM_PERCENT_DEFAULT, WATERFALL_BIAS_DEFAULT, COLORMAP_DEFAULT_INDEX,
   alphaForAveraging, emaStep, updateHoldValue,
+  hzToBinIndex, interpolateDcSpike,
 } from "../../html/instrument/spectrum-canvas.js";
 
 // Fake localStorage - a real empty store, not a global shim, since these
@@ -171,4 +172,39 @@ test("updateHoldValue (max) tracks new peaks instantly and decays otherwise ('Ma
 test("updateHoldValue (min) tracks new troughs instantly and NEVER decays (ported exactly, not a bug)", () => {
   assert.equal(updateHoldValue(-40, -60, 1, false), -60); // new trough - snap down
   assert.equal(updateHoldValue(-60, -40, 0.5, false), -60); // no new trough - value unchanged regardless of "decay"
+});
+
+test("hzToBinIndex is the inverse of hzForPixel's bin math at the centre", () => {
+  const absCenterHz = 145_500_000, binWidthHz = 1000, binCount = 1620;
+  assert.equal(hzToBinIndex(absCenterHz, absCenterHz, binWidthHz, binCount), binCount / 2);
+});
+
+test("hzToBinIndex at the span's left edge is bin 0", () => {
+  const absCenterHz = 10_000_000, binWidthHz = 1000, binCount = 1620;
+  const spanHz = binWidthHz * binCount;
+  assert.equal(hzToBinIndex(absCenterHz - spanHz / 2, absCenterHz, binWidthHz, binCount), 0);
+});
+
+test("interpolateDcSpike ('Hide DC spike') linearly interpolates a 5-bin window around the DC bin", () => {
+  const bins = new Float32Array([0, 0, 0, 0, 0, 10, 999, 999, 999, 999, 999, 20, 0, 0, 0]);
+  // dcBinIndex=8, halfWidth=2 -> interpolate indices 6..10 between anchors at 5 (val=10) and 11 (val=20)
+  const out = interpolateDcSpike(bins, 8);
+  assert.equal(out[5], 10); // anchor unchanged
+  assert.equal(out[11], 20); // anchor unchanged
+  // Float32Array storage rounds these - compare with a tolerance, not
+  // exact equality (the anchors above are copied verbatim, no arithmetic,
+  // so those stay exact).
+  assert.ok(Math.abs(out[6] - (10 + (20 - 10) * (1 / 6))) < 1e-4);
+  assert.ok(Math.abs(out[8] - (10 + (20 - 10) * (3 / 6))) < 1e-4); // exact midpoint
+  assert.ok(Math.abs(out[10] - (10 + (20 - 10) * (5 / 6))) < 1e-4);
+});
+
+test("interpolateDcSpike returns the input unchanged (not a copy) when the window runs off either edge", () => {
+  const bins = new Float32Array([1, 2, 3]);
+  assert.equal(interpolateDcSpike(bins, 1), bins); // dcBin=1, window would need indices -2..4, out of range
+});
+
+test("interpolateDcSpike returns the input unchanged for an empty/missing array", () => {
+  assert.equal(interpolateDcSpike(null, 5), null);
+  assert.equal(interpolateDcSpike(new Float32Array(0), 5).length, 0);
 });

@@ -60,6 +60,7 @@ createValuePanel($("sgm-meter"), (panel, close) => {
 // ---- Audio segment ----
 const audioPlayer = createAudioPlayer(client);
 let lastVolumeSlider = "1";
+let lastPanSlider = "0";
 
 function renderAudioState() {
   $("audio-state").textContent = !audioPlayer.isPlaying() ? "Off" : (audioPlayer.isRecording() ? "Rec" : "On");
@@ -73,6 +74,7 @@ createValuePanel($("sgm-audio"), (panel, close) => {
       <button class="k" id="audio-toggle">${audioPlayer.isPlaying() ? "Stop audio" : "Start audio"}</button>
       <label class="chk"><input type="checkbox" id="audio-pcm" ${audioPlayer.isPcm() ? "checked" : ""}> PCM (uncheck for Opus)</label>
       <div class="prow"><span class="cap" style="min-width:52px">Volume</span><input type="range" id="audio-volume" min="0" max="1" step="0.01" value="${lastVolumeSlider}" style="flex:1"></div>
+      <div class="prow"><span class="cap" style="min-width:52px">Pan</span><input type="range" id="audio-pan" min="-1" max="1" step="0.1" value="${lastPanSlider}" style="flex:1"></div>
       <button class="k mini" id="audio-record" ${audioPlayer.isPlaying() ? "" : "disabled"}>${audioPlayer.isRecording() ? "Stop recording" : "Record"}</button>
     </div>`;
   panel.querySelector("#audio-toggle").addEventListener("click", () => {
@@ -88,6 +90,10 @@ createValuePanel($("sgm-audio"), (panel, close) => {
     lastVolumeSlider = e.target.value;
     audioPlayer.setVolume(Number(e.target.value));
   });
+  panel.querySelector("#audio-pan").addEventListener("input", (e) => {
+    lastPanSlider = e.target.value;
+    audioPlayer.setPan(Number(e.target.value));
+  });
   panel.querySelector("#audio-record").addEventListener("click", () => {
     const freqKhz = currentFreqHz !== null ? currentFreqHz / 1000 : 0;
     audioPlayer.toggleRecording(freqKhz, client.mode || "unknown");
@@ -100,6 +106,7 @@ createValuePanel($("sgm-audio"), (panel, close) => {
 client.addEventListener("frontend", (e) => {
   const fe = e.detail;
   frontendFrequencyHz = fe.frequencyHz || 0;
+  spectrumDisplay.setFrontendFrequencyHz(frontendFrequencyHz);
   $("ident-fe").textContent = "· " + (fe.descriptionText || "unknown front end");
   currentCoverage = { lowHz: fe.frequencyHz + (fe.ifLowHz ?? 0), highHz: fe.frequencyHz + (fe.ifHighHz ?? 0) };
   meter.render(fe.ifPowerDb);
@@ -346,6 +353,23 @@ $("spectrum-overlap-send").addEventListener("click", () => {
 $("spectrum-poll-send").addEventListener("click", () => {
   const v = Number($("spectrum-poll").value);
   if (Number.isFinite(v) && v > 0) client.setSpectrumPollRate(v);
+});
+
+// ---- Cursor, spectrum fill style, hide DC spike ----
+$("cursor-active").addEventListener("change", (e) => spectrumDisplay.setCursorActive(e.target.checked));
+$("no-spectrum-fill").addEventListener("change", (e) => spectrumDisplay.setNoFill(e.target.checked));
+$("hide-dc-spike").checked = spectrumDisplay.isHideDcSpike();
+$("hide-dc-spike").addEventListener("change", (e) => spectrumDisplay.setHideDcSpike(e.target.checked));
+
+// ---- Reset this UI's own settings (scoped to instrument_* keys - shares
+// localStorage with the stock page on the same origin, so a blanket
+// localStorage.clear() would also wipe stock's settings; ported intent
+// (full local reset), narrowed scope (see INSTRUMENT-DECISIONS.md)). ----
+$("reset-settings").addEventListener("click", () => {
+  for (const key of Object.keys(localStorage)) {
+    if (key.startsWith("instrument_")) localStorage.removeItem(key);
+  }
+  location.reload();
 });
 
 function renderTelemetry() {

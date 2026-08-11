@@ -55,6 +55,7 @@ export function createAudioPlayer(client) {
       try { player?.destroy(); } catch (e) { /* ignore */ }
       player = new window.PCMPlayer({ encoding: "16bitInt", channels: cfg.channels, sampleRate: cfg.sampleRate, flushingTime: 250 });
       player.volume(sliderToGain(lastVolumeSlider));
+      player.pan(lastPan);
     } else if (player.audioCtx.state === "suspended") {
       player.resume();
     }
@@ -63,6 +64,16 @@ export function createAudioPlayer(client) {
   function setVolume(slider) {
     lastVolumeSlider = slider;
     if (player) player.volume(sliderToGain(slider));
+  }
+
+  // "panner_control" - stereo audio pan (-1..1), unrelated to spectrum
+  // view panning (Z:c:) or the display "cursor" marker - three separate
+  // stock features that happen to share loose naming. PCMPlayer already
+  // has a pan() method (pcm-player.js's StereoPannerNode) - reused as-is.
+  let lastPan = 0;
+  function setPan(v) {
+    lastPan = Number(v) || 0;
+    if (player) player.pan(lastPan);
   }
 
   async function initOpusDecoder() {
@@ -100,6 +111,7 @@ export function createAudioPlayer(client) {
         try { player?.destroy(); } catch (e) { /* ignore */ }
         player = new window.PCMPlayer({ encoding: "32bitFloat", channels, sampleRate: result.sampleRate, flushingTime: 250 });
         player.volume(sliderToGain(lastVolumeSlider));
+        player.pan(lastPan);
       }
       player.feed(interleaved);
     } catch (e) { console.warn("Opus decode error:", e); }
@@ -168,6 +180,7 @@ export function createAudioPlayer(client) {
     start,
     stop,
     setVolume,
+    setPan,
     setPcm,
     toggleRecording,
     isPlaying: () => playing,

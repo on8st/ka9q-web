@@ -529,3 +529,43 @@ held everywhere:
   control-dense card in this UI so far, but every one of them is a
   genuine "set it once and forget it" tuning knob, squarely fitting the
   brief's "rare things" philosophy even more than the earlier cards.
+
+## Cursor, panning, clear overlay/reset, fill style, DC spike (2026-08-11)
+
+Two of these four manifest lines turned out to each bundle **two
+unrelated stock ids** - checked individually rather than assumed:
+
+- **"Cursor / panning"** = `cursor` (a display-only cyan frequency
+  marker, `spectrum.js`'s `cursor_active`/`cursor_freq`/`drawCursor()` -
+  no WS traffic) **and** `panner_control` (stereo *audio* pan, the same
+  `StereoPannerNode` machinery already reused for volume in the audio
+  port - also no WS traffic). Genuinely unrelated features. A third,
+  pre-existing concept - left-drag panning the spectrum *view* - sends a
+  real `Z:c:<khz>` on drag-release, but that's neither of these two stock
+  ids and was already covered by the earlier zoom work.
+- **"Clear waterfall overlay / reset"** = `clear_overlay` (clears
+  *loaded CSV comparison traces* - a stock feature, "Load Data", that
+  has no instrument-UI equivalent to clear, since that load feature
+  itself isn't built here) **and** `reset` (`resetSettings()`:
+  `localStorage.clear()` + reload - a full settings wipe). Only `reset`
+  had anything meaningful to port. Narrowed its scope deliberately:
+  stock's page is the only thing at its origin, so a blanket
+  `localStorage.clear()` is safe there; this instrument UI shares its
+  *origin* (not just similarity) with the stock page at `/`, so the same
+  blanket clear would also wipe stock's own settings - surprising and
+  outside this button's stated scope. Ported as "clear every
+  `instrument_`-prefixed key, then reload" (all six of this UI's own
+  keys already share that prefix) instead.
+- **Spectrum fill style** (`ckNoSpectrumFill`) and **hide DC spike**
+  (`ckHideDcSpike`, this fork's own feature) ported directly - both
+  simple, single-purpose toggles, no surprises. DC-spike's
+  `interpolateDcSpike()` needed a `hzToBinIndex()` counterpart to
+  `hzForPixel()`/`pixelForHz()` (spectrum-canvas.js didn't have a plain
+  Hz→bin-index function yet, only Hz↔pixel) and the front end's real
+  tuned centre (`frontendFrequencyHz`, already tracked in `app.js` from
+  the `frontend` event) - wired through a new `setFrontendFrequencyHz()`.
+  Applied in `processFrame()` *before* FFT averaging and max/min hold, so
+  those also render/track a spike-free trace (stock's own ordering isn't
+  fully explicit here, but this is the more consistent choice - a
+  "cosmetic only" feature should look cosmetic-free everywhere it's
+  drawn, not just on the live trace).

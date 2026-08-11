@@ -197,6 +197,7 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
         <div class="prow"><span class="cap" style="min-width:52px">Size</span><button class="k mini" id="spectrum-size-down">Smaller</button><button class="k mini" id="spectrum-size-up">Larger</button></div>
         <div class="prow"><span class="cap" style="min-width:52px">Range</span><button class="k mini" id="range-autoscale">Autoscale</button><button class="k mini" id="baseline-down">Floor −</button><button class="k mini" id="baseline-up">Floor +</button><button class="k mini" id="range-dec">Ceil −</button><button class="k mini" id="range-inc">Ceil +</button></div>
         <div class="prow"><span class="cap" style="min-width:52px">Colormap</span><select class="k" id="colormap-select"></select><input type="number" class="k num" id="waterfall-bias" step="1" title="Waterfall bias, decrease to lighten"></div>
+        <div class="prow"><label class="chk"><input type="checkbox" id="cursor-active"> Cursor</label><label class="chk"><input type="checkbox" id="no-spectrum-fill"> No fill</label><label class="chk"><input type="checkbox" id="hide-dc-spike" checked> Hide DC spike</label></div>
       </div>
     </div>
     <div class="card"><div class="hd"><span class="silk">FFT &amp; hold</span></div>
@@ -230,6 +231,7 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
       <div class="bd">
         <div class="prow"><button class="k mini" id="export-csv">Download current spectrum (CSV)</button></div>
         <textarea class="k" id="notes-text" rows="3" placeholder="Notes"></textarea>
+        <div class="prow"><button class="k mini" id="reset-settings" title="Clears this instrument UI's own saved settings (range, colormap, memories, notes, meter style) and reloads. Does not affect the stock page.">Reset this UI's settings</button></div>
       </div>
     </div>
   </aside>
