@@ -3811,7 +3811,7 @@ static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_
   {
     static unsigned long dbg_count = 0;
     if (dbg_count++ % 20 == 0)
-      fprintf(stderr, "DBG spectrum_packet: Frontend.samprate=%d Frontend.frequency=%.3f\n",
+      fprintf(stderr, "DBG spectrum_packet: Frontend.samprate=%.3f Frontend.frequency=%.3f\n",
               Frontend.samprate, Frontend.frequency);
   }
   /* Record that we received a spectrum TLV for this session */
@@ -3946,10 +3946,10 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   {
     static unsigned long dbg_count = 0;
     if (dbg_count++ % 20 == 0)
-      fprintf(stderr, "DBG status_packet: Frontend.samprate=%d Frontend.frequency=%.3f has_samprate_tlv=%d has_lo_tlv=%d\n",
+      fprintf(stderr, "DBG status_packet: Frontend.samprate=%.3f Frontend.frequency=%.3f has_samprate_tlv=%d has_lo_tlv=%d\n",
               Frontend.samprate, Frontend.frequency,
-              tlv_has_type(buffer + 1, rx_length - 1, INPUT_SAMPRATE),
-              tlv_has_type(buffer + 1, rx_length - 1, FIRST_LO_FREQUENCY));
+              (int)tlv_has_type(buffer + 1, rx_length - 1, INPUT_SAMPRATE),
+              (int)tlv_has_type(buffer + 1, rx_length - 1, FIRST_LO_FREQUENCY));
   }
 
   if (have_shift) {
