@@ -529,16 +529,24 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     // maxHoldEnabled, matching stock exactly (only Max/Min are gated by it).
     if (showLive) {
       // "Spectrum fill style" (ckNoSpectrumFill) - only skips the fill,
-      // the stroke below always draws (matches stock exactly).
+      // the stroke below always draws (matches stock exactly). Baseline
+      // is wfTop (the integer row the waterfall actually starts at), NOT
+      // the fractional splitY: splitY can land mid-pixel (e.g. 399.5),
+      // and an antialiased fill/stroke reaching down to a fractional y
+      // partially paints the row AT wfTop = floor(splitY) - the same row
+      // the waterfall just wrote its freshest data into, a few lines
+      // above. That tinted the waterfall's very first (newest) row a
+      // visibly different shade from the rows below it every frame -
+      // reported live as a "dampened"/bright top row (2026-08-11).
       if (!noFill) {
         ctx.beginPath();
-        ctx.moveTo(0, splitY);
+        ctx.moveTo(0, wfTop);
         for (let x = 0; x < w; x++) {
           const db = binsDb[binIndexForPixel(x, w, binCount)];
           const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
-          ctx.lineTo(x, splitY - t * (splitY - 14));
+          ctx.lineTo(x, wfTop - t * (wfTop - 14));
         }
-        ctx.lineTo(w, splitY);
+        ctx.lineTo(w, wfTop);
         ctx.closePath();
         ctx.fillStyle = "rgba(75,224,138,0.10)";
         ctx.fill();
@@ -547,7 +555,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
       for (let x = 0; x < w; x++) {
         const db = binsDb[binIndexForPixel(x, w, binCount)];
         const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
-        const y = splitY - t * (splitY - 14);
+        const y = wfTop - t * (wfTop - 14);
         if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
       ctx.strokeStyle = "#4BE08A";
@@ -563,7 +571,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
       for (let x = 0; x < w; x++) {
         const db = arr[binIndexForPixel(x, w, binCount)];
         const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
-        const y = splitY - t * (splitY - 14);
+        const y = wfTop - t * (wfTop - 14);
         if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
       ctx.strokeStyle = color;
@@ -583,13 +591,13 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
         ctx.strokeStyle = "#00ffff";
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, splitY);
+        ctx.lineTo(x, wfTop);
         ctx.stroke();
       }
     }
 
     // Tuned-frequency band: confined entirely to the trace region
-    // (0..splitY), never the waterfall below. That region is fully
+    // (0..wfTop), never the waterfall below. That region is fully
     // repainted every frame, but the waterfall only ever scrolls its
     // existing pixels - anything drawn into it here (even just the thin
     // line) gets redrawn onto the SAME still-visible rows on every
@@ -602,11 +610,11 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
       const x = pixelForHz(tunedFreqHz, w, centerHz, binWidthHz, binCount);
       if (x !== null) {
         ctx.fillStyle = "rgba(86,199,255,0.13)";
-        ctx.fillRect(x - w * 0.0175, 0, w * 0.035, splitY);
+        ctx.fillRect(x - w * 0.0175, 0, w * 0.035, wfTop);
         ctx.strokeStyle = "#56C7FF";
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, splitY);
+        ctx.lineTo(x, wfTop);
         ctx.stroke();
       }
     }
@@ -620,10 +628,10 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
       const x = (w / 8) * i;
       ctx.beginPath();
       ctx.moveTo(x, 0);
-      ctx.lineTo(x, splitY);
+      ctx.lineTo(x, wfTop);
       ctx.stroke();
       const hz = hzForPixel(x, w, centerHz, binWidthHz, binCount);
-      ctx.fillText(fmtAxisLabel(hz), x - 16 * dpr, splitY - 4 * dpr);
+      ctx.fillText(fmtAxisLabel(hz), x - 16 * dpr, wfTop - 4 * dpr);
     }
 
     // "Show ham band edge markers" - ported from spectrum.js's
