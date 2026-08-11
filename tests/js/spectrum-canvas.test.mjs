@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   dbToColor, binIndexForPixel, hzForPixel, pixelForHz,
   clampSpectrumPercent, SPECTRUM_PERCENT_MIN, SPECTRUM_PERCENT_MAX,
-  measureAutoscaleRange,
+  measureAutoscaleRange, pickColormapColor, COLORMAP_NAMES,
 } from "../../html/instrument/spectrum-canvas.js";
 
 test("dbToColor clamps to the first/last heatmap stops at the range ends", () => {
@@ -88,4 +88,21 @@ test("measureAutoscaleRange rounds a non-multiple-of-5 peak up, never down", () 
   const bins = new Float32Array([-80, -37]);
   const { maxDb } = measureAutoscaleRange(bins);
   assert.equal(maxDb, -35); // ceil(-37/5)*5 = -35, not -40
+});
+
+test("pickColormapColor clamps out-of-range scaled values to the first/last stop", () => {
+  const cmap = [[1, 1, 1], [2, 2, 2], [3, 3, 3]];
+  assert.deepEqual(pickColormapColor(cmap, -1), [1, 1, 1]);
+  assert.deepEqual(pickColormapColor(cmap, 2), [3, 3, 3]);
+});
+
+test("pickColormapColor picks the nearest stop for an in-range value ('Colormap selection')", () => {
+  const cmap = [[0, 0, 0], [10, 10, 10], [20, 20, 20], [30, 30, 30]];
+  assert.deepEqual(pickColormapColor(cmap, 0), [0, 0, 0]);
+  assert.deepEqual(pickColormapColor(cmap, 1), [30, 30, 30]);
+  assert.deepEqual(pickColormapColor(cmap, 0.5), [20, 20, 20]); // round(0.5*3)=2 -> index 2
+});
+
+test("COLORMAP_NAMES lists all 10 stock colormaps in the stock <select>'s exact order", () => {
+  assert.deepEqual(COLORMAP_NAMES, ["turbo", "fosphorz", "viridis", "inferno", "magma", "jet", "binary", "blue", "short", "kiwi"]);
 });

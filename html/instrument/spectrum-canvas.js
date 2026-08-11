@@ -14,6 +14,24 @@ const HEATMAP_STOPS = [
   [230, 0, 0],
 ];
 
+// "Colormap selection" (stock: html/colormap.js's `colormaps` array,
+// selected via the `colormap` <select>). Reused as-is via a classic
+// <script> tag (html/instrument/index.html loads ../colormap.js) rather
+// than re-deriving ~2500 RGB triples by hand - `window.colormaps` is the
+// same 10-entry array stock uses. Falls back to the built-in HEATMAP_STOPS
+// gradient below if that script hasn't loaded (defensive only; it always
+// does in the real deployed page).
+export const COLORMAP_NAMES = ["turbo", "fosphorz", "viridis", "inferno", "magma", "jet", "binary", "blue", "short", "kiwi"];
+export const COLORMAP_DEFAULT_INDEX = 9; // "kiwi" - matches stock's own default (Spectrum constructor)
+
+/** Picks a colour from a stock colormap array (list of [r,g,b] stops) for
+ * a 0..1 normalized value. */
+export function pickColormapColor(cmap, scaled) {
+  const t = Math.min(1, Math.max(0, scaled));
+  const idx = Math.round(t * (cmap.length - 1));
+  return cmap[idx] || cmap[cmap.length - 1] || [0, 0, 0];
+}
+
 export function dbToColor(db, minDb, maxDb) {
   const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
   const scaled = t * (HEATMAP_STOPS.length - 1);
@@ -73,6 +91,25 @@ export function clampSpectrumPercent(pct) {
 function loadSpectrumPercent() {
   const raw = Number(localStorage.getItem(SPECTRUM_PERCENT_KEY));
   return Number.isFinite(raw) && raw > 0 ? clampSpectrumPercent(raw) : SPECTRUM_PERCENT_DEFAULT;
+}
+
+// "Waterfall colour bias" (stock: waterfallBiasInput) - a plain offset
+// added to the floor (minDb) used for the WATERFALL's colour mapping
+// only, not the trace (ported exactly: html/spectrum.js's setRange()
+// computes wf_min_db = min_db + waterfallBias while the trace keeps
+// min_db unmodified). Default 5, matching stock's Spectrum constructor.
+export const WATERFALL_BIAS_DEFAULT = 5;
+const WATERFALL_BIAS_KEY = "instrument_waterfall_bias";
+const COLORMAP_INDEX_KEY = "instrument_colormap_index";
+
+function loadWaterfallBias() {
+  const raw = Number(localStorage.getItem(WATERFALL_BIAS_KEY));
+  return Number.isFinite(raw) ? raw : WATERFALL_BIAS_DEFAULT;
+}
+
+function loadColorIndex() {
+  const raw = Number(localStorage.getItem(COLORMAP_INDEX_KEY));
+  return Number.isInteger(raw) && raw >= 0 && raw < COLORMAP_NAMES.length ? raw : COLORMAP_DEFAULT_INDEX;
 }
 
 // "Spectrum autoscale" (stock: autoscale button, Spectrum.prototype.
@@ -138,11 +175,36 @@ export function createSpectrumDisplay(container) {
   let smoothMinDb = null;
   let smoothMaxDb = null;
   let spectrumPercent = loadSpectrumPercent();
+  let waterfallBias = loadWaterfallBias();
+  let colorIndex = loadColorIndex();
 
   function setSpectrumPercent(pct) {
     spectrumPercent = clampSpectrumPercent(pct);
     localStorage.setItem(SPECTRUM_PERCENT_KEY, String(spectrumPercent));
     if (!paused) draw();
+  }
+
+  function setWaterfallBias(bias) {
+    waterfallBias = Number(bias);
+    if (!Number.isFinite(waterfallBias)) waterfallBias = WATERFALL_BIAS_DEFAULT;
+    localStorage.setItem(WATERFALL_BIAS_KEY, String(waterfallBias));
+    if (!paused) draw();
+  }
+
+  function setColorIndex(idx) {
+    if (!Number.isInteger(idx) || idx < 0 || idx >= COLORMAP_NAMES.length) return;
+    colorIndex = idx;
+    localStorage.setItem(COLORMAP_INDEX_KEY, String(colorIndex));
+    if (!paused) draw();
+  }
+
+  function waterfallColor(db, minDb, maxDb) {
+    const cmap = (typeof window !== "undefined" && window.colormaps) ? window.colormaps[colorIndex] : null;
+    if (!cmap) return dbToColor(db, minDb, maxDb);
+    const wfMinDb = minDb + waterfallBias;
+    const denom = maxDb - wfMinDb;
+    const scaled = denom !== 0 ? (db - wfMinDb) / denom : 0;
+    return pickColormapColor(cmap, scaled);
   }
 
   function updateAutorange(binsDb) {
@@ -238,7 +300,7 @@ export function createSpectrumDisplay(container) {
       const row = ctx.createImageData(w, 1);
       for (let x = 0; x < w; x++) {
         const db = binsDb[binIndexForPixel(x, w, binCount)];
-        const [r, g, b] = dbToColor(db, minDb, maxDb);
+        const [r, g, b] = waterfallColor(db, minDb, maxDb);
         row.data[x * 4] = r;
         row.data[x * 4 + 1] = g;
         row.data[x * 4 + 2] = b;
@@ -323,6 +385,10 @@ export function createSpectrumDisplay(container) {
     baselineDown,
     rangeIncrease,
     rangeDecrease,
+    setWaterfallBias,
+    getWaterfallBias: () => waterfallBias,
+    setColorIndex,
+    getColorIndex: () => colorIndex,
     canvas,
   };
 }

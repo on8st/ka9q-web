@@ -430,3 +430,37 @@ both materializing whatever the current range is (auto or manual) into a
 fixed one first, same as stock always operating on a concrete pair of
 numbers. `rangeDecrease()` keeps stock's 10 dB minimum-span guard. New
 "Range" row in the drawer's "Spectrum display" card.
+
+## Waterfall colour bias + colormap selection (2026-08-11)
+
+Both confirmed purely client-side (no WS traffic, no protocol doc hits
+for "colormap"/"bias" anywhere). Colormap selection was the interesting
+one: 8 of stock's 10 colormaps (`html/colormap.js`) are ~256-entry
+numeric RGB tables copied wholesale from known external palettes
+(matplotlib's viridis/inferno/magma, MATLAB jet, Google's turbo,
+KiwiSDR/OpenWebRX's kiwi - the default) - not simple gradients that are
+sanely hand-re-derived. Reused `html/colormap.js` as-is via a classic
+`<script>` tag (same pattern as `pcm-player.js`/`opus-decoder.min.js` -
+loaded once, `window.colormaps` referenced from `spectrum-canvas.js`)
+rather than re-deriving ~2500 RGB triples or vendoring a duplicate copy.
+
+`pickColormapColor(cmap, scaled)` is the only new pure logic - nearest-
+stop lookup into whichever palette array is selected. Bias is ported
+exactly per the formula found in `spectrum.js`'s `setRange()`: added to
+the **floor only**, and **only for the waterfall's colour mapping** -
+the trace's own range is untouched by it (confirmed: stock's
+`wf_min_db = min_db + waterfallBias`, trace keeps plain `min_db`).
+`waterfallColor()` in `spectrum-canvas.js` implements exactly that,
+falling back to the built-in `HEATMAP_STOPS` gradient if `colormap.js`
+somehow hasn't loaded (defensive only).
+
+Deliberately scoped to the **waterfall only**, not the trace's fill
+colour - stock's colormap also drives the trace's gradient fill, but
+this instrument UI's trace has its own deliberate flat phosphor-green
+look matching the approved design mockup; recolouring it per-colormap
+would fight that mockup rather than serve it. Both persisted to
+`localStorage` (`instrument_colormap_index`, `instrument_waterfall_bias`),
+default colormap index 9 ("kiwi"), matching stock's own default. New
+"Colormap" row in the drawer's "Spectrum display" card: a `<select>`
+built from `COLORMAP_NAMES` (same order/labels as stock) plus the bias
+number input.

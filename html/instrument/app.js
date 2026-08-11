@@ -10,7 +10,7 @@ import { STEP_OPTIONS_HZ, applyStep, fmtStep } from "./tune-step.js";
 import { bandsInCoverage, BAND_OPTIONS } from "./band-options.js";
 import { loadMemories, addMemory, deleteMemory } from "./memories.js";
 import { createMeter } from "./meter.js";
-import { createSpectrumDisplay } from "./spectrum-canvas.js";
+import { createSpectrumDisplay, COLORMAP_NAMES } from "./spectrum-canvas.js";
 import { absoluteCenterHz } from "./spectrum-decode.js";
 import { loadNotes, saveNotes } from "./notes.js";
 import { spectrumToCsv } from "./spectrum-export.js";
@@ -310,6 +310,12 @@ $("baseline-up").addEventListener("click", () => spectrumDisplay.baselineUp());
 $("baseline-down").addEventListener("click", () => spectrumDisplay.baselineDown());
 $("range-inc").addEventListener("click", () => spectrumDisplay.rangeIncrease());
 $("range-dec").addEventListener("click", () => spectrumDisplay.rangeDecrease());
+
+$("colormap-select").innerHTML = COLORMAP_NAMES.map((name, i) => `<option value="${i}">${name}</option>`).join("");
+$("colormap-select").value = String(spectrumDisplay.getColorIndex());
+$("colormap-select").addEventListener("change", (e) => spectrumDisplay.setColorIndex(Number(e.target.value)));
+$("waterfall-bias").value = String(spectrumDisplay.getWaterfallBias());
+$("waterfall-bias").addEventListener("change", (e) => spectrumDisplay.setWaterfallBias(e.target.value));
 
 function renderTelemetry() {
   const s = spectrumDisplay.getLastSpectrum();
