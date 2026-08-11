@@ -1959,13 +1959,18 @@ onion_connection_status home(void *data, onion_request * req,
      front end's real coverage so every front end opens on something
      valid. */
   sp->frequency = 10000000;
-  if (Frontend.samprate > 0) {
+  if (Frontend.samprate > 0 && !isnan(Frontend.frequency)) {
     double lo_if, hi_if;
     frontend_if_bounds(&lo_if, &hi_if);
     int64_t const lo_bound = (int64_t)round(Frontend.frequency + lo_if);
     int64_t const hi_bound = (int64_t)round(Frontend.frequency + hi_if);
     if (hi_bound > lo_bound && (sp->frequency < lo_bound || sp->frequency > hi_bound))
       sp->frequency = (uint32_t)round((lo_bound + hi_bound) / 2.0);
+    fprintf(stderr, "[freq-default DEBUG] samprate=%.0f frequency=%.0f min_IF=%.0f max_IF=%.0f lo_if=%.0f hi_if=%.0f lo_bound=%lld hi_bound=%lld -> sp->frequency=%u\n",
+            Frontend.samprate, Frontend.frequency, Frontend.min_IF, Frontend.max_IF, lo_if, hi_if, (long long)lo_bound, (long long)hi_bound, sp->frequency);
+  } else {
+    fprintf(stderr, "[freq-default DEBUG] skipped: samprate=%.0f frequency=%.0f (isnan=%d) -> sp->frequency=%u\n",
+            Frontend.samprate, Frontend.frequency, isnan(Frontend.frequency), sp->frequency);
   }
   int level = 0;
   if (Frontend.samprate > 0) {
