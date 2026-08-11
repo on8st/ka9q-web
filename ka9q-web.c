@@ -1949,7 +1949,24 @@ onion_connection_status home(void *data, onion_request * req,
   /* adoptOnParameterMismatch removed; adoption controlled server-side by backend shift */
 
 
-  sp->frequency=10000000;
+  /* 10 MHz (WWV) is a deliberately good HF default - a real, known signal.
+     It's not a default at all for a tuner-based front end (VHF/UHF): it's
+     simply outside the receivable range, so the channel never locks onto
+     anything and the client never gets a tunedFreq echo to replace its
+     initial placeholder display (confirmed live: VHF/UHF sessions stuck
+     showing all-zero frequency until manually tuned). Keep 10 MHz when
+     it's actually receivable; otherwise default to the centre of the
+     front end's real coverage so every front end opens on something
+     valid. */
+  sp->frequency = 10000000;
+  if (Frontend.samprate > 0) {
+    double lo_if, hi_if;
+    frontend_if_bounds(&lo_if, &hi_if);
+    int64_t const lo_bound = (int64_t)round(Frontend.frequency + lo_if);
+    int64_t const hi_bound = (int64_t)round(Frontend.frequency + hi_if);
+    if (hi_bound > lo_bound && (sp->frequency < lo_bound || sp->frequency > hi_bound))
+      sp->frequency = (uint32_t)round((lo_bound + hi_bound) / 2.0);
+  }
   int level = 0;
   if (Frontend.samprate > 0) {
     /* Center the default view on the real front end's usable band, and

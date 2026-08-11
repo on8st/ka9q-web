@@ -246,3 +246,22 @@ value) redraws normally. Covered by a DOM-stub unit test in
 `meter.test.mjs`, no jsdom dependency) rather than only a live Playwright
 check, since the race is about `render()`'s own contract and doesn't need
 a real browser to verify.
+
+**A sixth issue, reported by the station operator during a functionality
+review**: VHF and UHF opened on a brand-new session showing
+`000.000.000` MHz instead of any usable frequency, while HF opened
+correctly at 10.000.000 MHz (WWV). Reproduced directly: forced fresh
+sessions (container restart drops ka9q-web's in-memory, per-client-IP
+session state) and confirmed live - VHF/UHF stuck at all-zero digits, HF
+fine. Root cause: `ka9q-web.c`'s session-init code (`sp->frequency =
+10000000`) hardcodes 10 MHz - a genuinely good default for HF (a real,
+known signal) - for every front end unconditionally. 10 MHz is nowhere
+near VHF's (~144-146 MHz) or UHF's (~430-440 MHz) receivable range, so
+the channel never locks onto anything and the client never receives a
+`tunedFreq` echo to replace its initial placeholder - it just sits there
+looking broken until someone tunes it manually. Fixed by keeping the
+10 MHz default only when it actually falls within the front end's real
+coverage (`Frontend.frequency + frontend_if_bounds()`, the same bound
+calculation `check_frequency()` already uses); otherwise defaulting to
+the centre of that coverage, so every front end now opens somewhere
+receivable.
