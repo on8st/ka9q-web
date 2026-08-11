@@ -88,8 +88,10 @@ export function clampSpectrumPercent(pct) {
   return Math.min(SPECTRUM_PERCENT_MAX, Math.max(SPECTRUM_PERCENT_MIN, pct));
 }
 
-function loadSpectrumPercent() {
-  const raw = Number(localStorage.getItem(SPECTRUM_PERCENT_KEY));
+export function loadSpectrumPercent(storage = localStorage) {
+  const stored = storage.getItem(SPECTRUM_PERCENT_KEY);
+  if (stored === null) return SPECTRUM_PERCENT_DEFAULT;
+  const raw = Number(stored);
   return Number.isFinite(raw) && raw > 0 ? clampSpectrumPercent(raw) : SPECTRUM_PERCENT_DEFAULT;
 }
 
@@ -102,13 +104,24 @@ export const WATERFALL_BIAS_DEFAULT = 5;
 const WATERFALL_BIAS_KEY = "instrument_waterfall_bias";
 const COLORMAP_INDEX_KEY = "instrument_colormap_index";
 
-function loadWaterfallBias() {
-  const raw = Number(localStorage.getItem(WATERFALL_BIAS_KEY));
+// Exported so the "localStorage not set yet -> real default, not 0"
+// behaviour is directly unit-testable without a full canvas/DOM stub -
+// Number(localStorage.getItem(missingKey)) is Number(null) which is 0,
+// NOT NaN, so a naive Number.isFinite()-only guard silently accepts an
+// unset key as "0" instead of falling through to the real default (this
+// bit both of these on first write - caught live, not by a test, which
+// is exactly why they're pure/exported now).
+export function loadWaterfallBias(storage = localStorage) {
+  const stored = storage.getItem(WATERFALL_BIAS_KEY);
+  if (stored === null) return WATERFALL_BIAS_DEFAULT;
+  const raw = Number(stored);
   return Number.isFinite(raw) ? raw : WATERFALL_BIAS_DEFAULT;
 }
 
-function loadColorIndex() {
-  const raw = Number(localStorage.getItem(COLORMAP_INDEX_KEY));
+export function loadColorIndex(storage = localStorage) {
+  const stored = storage.getItem(COLORMAP_INDEX_KEY);
+  if (stored === null) return COLORMAP_DEFAULT_INDEX;
+  const raw = Number(stored);
   return Number.isInteger(raw) && raw >= 0 && raw < COLORMAP_NAMES.length ? raw : COLORMAP_DEFAULT_INDEX;
 }
 

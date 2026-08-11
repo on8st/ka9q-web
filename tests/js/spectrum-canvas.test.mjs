@@ -4,7 +4,16 @@ import {
   dbToColor, binIndexForPixel, hzForPixel, pixelForHz,
   clampSpectrumPercent, SPECTRUM_PERCENT_MIN, SPECTRUM_PERCENT_MAX,
   measureAutoscaleRange, pickColormapColor, COLORMAP_NAMES,
+  loadSpectrumPercent, loadWaterfallBias, loadColorIndex,
+  SPECTRUM_PERCENT_DEFAULT, WATERFALL_BIAS_DEFAULT, COLORMAP_DEFAULT_INDEX,
 } from "../../html/instrument/spectrum-canvas.js";
+
+// Fake localStorage - a real empty store, not a global shim, since these
+// loaders take `storage` as an injectable parameter.
+function fakeStorage(initial = {}) {
+  const store = { ...initial };
+  return { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+}
 
 test("dbToColor clamps to the first/last heatmap stops at the range ends", () => {
   assert.deepEqual(dbToColor(-100, -100, -20), [0, 0, 0]);
@@ -105,4 +114,28 @@ test("pickColormapColor picks the nearest stop for an in-range value ('Colormap 
 
 test("COLORMAP_NAMES lists all 10 stock colormaps in the stock <select>'s exact order", () => {
   assert.deepEqual(COLORMAP_NAMES, ["turbo", "fosphorz", "viridis", "inferno", "magma", "jet", "binary", "blue", "short", "kiwi"]);
+});
+
+// Regression: Number(localStorage.getItem(missingKey)) is Number(null),
+// which is 0 - NOT NaN. A loader that only checks Number.isFinite()
+// silently treats "never set" as "explicitly set to 0" instead of falling
+// through to the real default. Caught live (waterfall bias and colormap
+// both defaulted to 0/"turbo" instead of 5/"kiwi" on first ever load)
+// before this test existed.
+test("loadSpectrumPercent defaults correctly when localStorage has never been set (not 0)", () => {
+  assert.equal(loadSpectrumPercent(fakeStorage()), SPECTRUM_PERCENT_DEFAULT);
+});
+
+test("loadWaterfallBias defaults correctly when localStorage has never been set (not 0)", () => {
+  assert.equal(loadWaterfallBias(fakeStorage()), WATERFALL_BIAS_DEFAULT);
+});
+
+test("loadColorIndex defaults correctly when localStorage has never been set (not 0/\"turbo\")", () => {
+  assert.equal(loadColorIndex(fakeStorage()), COLORMAP_DEFAULT_INDEX);
+});
+
+test("loadSpectrumPercent/loadWaterfallBias/loadColorIndex read back a real stored value", () => {
+  assert.equal(loadSpectrumPercent(fakeStorage({ instrument_spectrum_percent: "70" })), 70);
+  assert.equal(loadWaterfallBias(fakeStorage({ instrument_waterfall_bias: "-3" })), -3);
+  assert.equal(loadColorIndex(fakeStorage({ instrument_colormap_index: "5" })), 5);
 });
