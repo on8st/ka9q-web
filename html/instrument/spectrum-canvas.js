@@ -56,6 +56,25 @@ function fmtAxisLabel(hz) {
   return (hz / 1e6).toFixed(3);
 }
 
+// "Spectrum display size" (stock: spectrum_size_up/spectrum_size_down,
+// html/spectrum.js's incrementSpectrumPercent()/decrementSpectrumPercent())
+// is purely a local trace/waterfall split ratio - confirmed no WS traffic
+// exists for it in the stock UI, just canvas geometry + localStorage.
+export const SPECTRUM_PERCENT_MIN = 10;
+export const SPECTRUM_PERCENT_MAX = 90;
+export const SPECTRUM_PERCENT_DEFAULT = 46;
+export const SPECTRUM_PERCENT_STEP = 5;
+const SPECTRUM_PERCENT_KEY = "instrument_spectrum_percent";
+
+export function clampSpectrumPercent(pct) {
+  return Math.min(SPECTRUM_PERCENT_MAX, Math.max(SPECTRUM_PERCENT_MIN, pct));
+}
+
+function loadSpectrumPercent() {
+  const raw = Number(localStorage.getItem(SPECTRUM_PERCENT_KEY));
+  return Number.isFinite(raw) && raw > 0 ? clampSpectrumPercent(raw) : SPECTRUM_PERCENT_DEFAULT;
+}
+
 // How fast the autorange floor/ceiling adapts to the real incoming data
 // (0 = never moves, 1 = snaps instantly to the latest frame). Smoothed
 // rather than snapping so the display doesn't flicker frame to frame.
@@ -97,6 +116,13 @@ export function createSpectrumDisplay(container) {
   let manualRange = null; // {minDb, maxDb} once the operator sets one explicitly
   let smoothMinDb = null;
   let smoothMaxDb = null;
+  let spectrumPercent = loadSpectrumPercent();
+
+  function setSpectrumPercent(pct) {
+    spectrumPercent = clampSpectrumPercent(pct);
+    localStorage.setItem(SPECTRUM_PERCENT_KEY, String(spectrumPercent));
+    if (!paused) draw();
+  }
 
   function updateAutorange(binsDb) {
     let min = Infinity;
@@ -127,7 +153,7 @@ export function createSpectrumDisplay(container) {
     const w = canvas.width;
     const h = canvas.height;
     if (w < 4 || h < 4) return;
-    const splitY = h * 0.46;
+    const splitY = h * (spectrumPercent / 100);
     const { minDb, maxDb } = currentRange();
 
     // Only the trace region gets wiped each frame - the waterfall region
@@ -227,6 +253,10 @@ export function createSpectrumDisplay(container) {
     isPaused: () => paused,
     setTunedFreqHz: (hz) => { tunedFreqHz = hz; if (!paused) draw(); },
     getLastSpectrum: () => lastSpectrum,
+    setSpectrumPercent,
+    getSpectrumPercent: () => spectrumPercent,
+    incrementSpectrumPercent: () => setSpectrumPercent(spectrumPercent + SPECTRUM_PERCENT_STEP),
+    decrementSpectrumPercent: () => setSpectrumPercent(spectrumPercent - SPECTRUM_PERCENT_STEP),
     canvas,
   };
 }

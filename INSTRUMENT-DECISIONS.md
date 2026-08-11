@@ -352,3 +352,41 @@ already documented elsewhere in this fork:
   that's disabled until audio is actually playing (mirrors stock's own
   "please start audio before recording" guard, but as a disabled state
   rather than an alert dialog).
+
+## Zoom + spectrum display size (2026-08-11)
+
+`PROTOCOL-TEXT.md` had explicitly flagged `Z:*` commands beyond `Z:SIZE`
+as out of scope for its pass - researched and derived fresh from
+`html/radio.js`/`html/spectrum.js` before porting:
+
+- Zoom level is an **integer zoom-table index** (0..N-1), not a target
+  span/Hz-per-bin value - `Z:<index>`, wrapped in the `C:` envelope. The
+  table size is front-end-specific and queried once via a **raw**
+  `Z:SIZE` (unwrapped, like spectrum's `S:`/`S:STOP` - not every command
+  uses the envelope), reply `ZSIZE:<n>`. Sent once on connect
+  (`ws-client.js`'s `connect()`, alongside the existing spectrum-thread
+  kickstart) and used to set the zoom slider's `max`.
+- `zoomin()`/`zoomout()` (stock's In/Out buttons) send a relative step
+  command that also carries the currently-tuned frequency: `Z:+:<khz>` /
+  `Z:-:<khz>` - `client.zoomStep(direction, freqHz)`.
+- "Zoom to a clicked centre" in the parity manifest turned out to name
+  the stock **`zoomcenter` button** ("Zoom Center", re-centers on the
+  *currently tuned* frequency: `Z:c:<khz>`) - not literally clicking the
+  spectrum canvas. That's a separate stock mechanism (`ckKeepFreqCentered`
+  / "AZC", which changes what a canvas click does) belonging with "Keep
+  frequency centred" instead, since the instrument UI doesn't have
+  click-to-tune on the canvas yet either - left for that feature's own
+  pass rather than half-building click-to-tune here just to gate it.
+- Spectrum display size (`spectrum_size_up`/`down`) is confirmed
+  **client-side only** - no WS traffic in stock at all, just a
+  `canvas.height * spectrumPercent/100` trace/waterfall split ratio
+  persisted to `localStorage`. Ported as `spectrum-canvas.js`'s
+  `setSpectrumPercent()`/`increment`/`decrementSpectrumPercent()`,
+  replacing the previous hardcoded `h * 0.46` split; the display now
+  remembers its size across reloads the same way stock does
+  (`instrument_spectrum_percent` key, matching this fork's existing
+  `instrument_*` localStorage naming).
+- UI placement: all three live in the drawer's new "Spectrum display"
+  card, not the main instrument bar - these are setup-once adjustments,
+  not per-tune interaction, matching the brief's "rare things are one
+  action away" philosophy already applied to telemetry/pause/export.

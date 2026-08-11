@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { dbToColor, binIndexForPixel, hzForPixel, pixelForHz } from "../../html/instrument/spectrum-canvas.js";
+import {
+  dbToColor, binIndexForPixel, hzForPixel, pixelForHz,
+  clampSpectrumPercent, SPECTRUM_PERCENT_MIN, SPECTRUM_PERCENT_MAX,
+} from "../../html/instrument/spectrum-canvas.js";
 
 test("dbToColor clamps to the first/last heatmap stops at the range ends", () => {
   assert.deepEqual(dbToColor(-100, -100, -20), [0, 0, 0]);
@@ -65,4 +68,10 @@ test("pixelForHz returns null for a frequency outside the displayed span", () =>
   const width = 1000, absCenterHz = 145_500_000, binWidthHz = 500, binCount = 1620;
   assert.equal(pixelForHz(absCenterHz + binWidthHz * binCount, width, absCenterHz, binWidthHz, binCount), null);
   assert.equal(pixelForHz(0, width, absCenterHz, binWidthHz, binCount), null);
+});
+
+test("clampSpectrumPercent clamps to [MIN, MAX] (\"spectrum display size\" +/- buttons)", () => {
+  assert.equal(clampSpectrumPercent(0), SPECTRUM_PERCENT_MIN);
+  assert.equal(clampSpectrumPercent(100), SPECTRUM_PERCENT_MAX);
+  assert.equal(clampSpectrumPercent(50), 50);
 });

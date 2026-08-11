@@ -72,7 +72,7 @@ createValuePanel($("sgm-audio"), (panel, close) => {
     <div class="pop-body">
       <button class="k" id="audio-toggle">${audioPlayer.isPlaying() ? "Stop audio" : "Start audio"}</button>
       <label class="chk"><input type="checkbox" id="audio-pcm" ${audioPlayer.isPcm() ? "checked" : ""}> PCM (uncheck for Opus)</label>
-      <div class="prow"><span class="cap" style="min-width:52px">Volume</span><input type="range" id="audio-volume" min="0" max="1" step="0.01" value="${lastVolumeSlider}"></div>
+      <div class="prow"><span class="cap" style="min-width:52px">Volume</span><input type="range" id="audio-volume" min="0" max="1" step="0.01" value="${lastVolumeSlider}" style="flex:1"></div>
       <button class="k mini" id="audio-record" ${audioPlayer.isPlaying() ? "" : "disabled"}>${audioPlayer.isRecording() ? "Stop recording" : "Record"}</button>
     </div>`;
   panel.querySelector("#audio-toggle").addEventListener("click", () => {
@@ -291,6 +291,20 @@ $("rare-things").addEventListener("click", () => {
   if (drawer.classList.contains("open")) renderTelemetry();
 });
 $("drawer-close").addEventListener("click", () => drawer.classList.remove("open"));
+
+// ---- Zoom + spectrum display size (both live in the drawer - setup-once
+// adjustments, not per-tune interaction, per the brief's "rare things"
+// philosophy). ----
+client.addEventListener("zoomTableSize", (e) => { $("zoom-level").max = String(e.detail.size - 1); });
+client.addEventListener("spectrum", (e) => {
+  if (document.activeElement !== $("zoom-level")) $("zoom-level").value = String(e.detail.zoomLevel);
+});
+$("zoom-level").addEventListener("input", (e) => client.setZoomLevel(Number(e.target.value)));
+$("zoom-in").addEventListener("click", () => { if (currentFreqHz !== null) client.zoomStep(1, currentFreqHz); });
+$("zoom-out").addEventListener("click", () => { if (currentFreqHz !== null) client.zoomStep(-1, currentFreqHz); });
+$("zoom-center").addEventListener("click", () => { if (currentFreqHz !== null) client.zoomCenter(currentFreqHz); });
+$("spectrum-size-up").addEventListener("click", () => spectrumDisplay.incrementSpectrumPercent());
+$("spectrum-size-down").addEventListener("click", () => spectrumDisplay.decrementSpectrumPercent());
 
 function renderTelemetry() {
   const s = spectrumDisplay.getLastSpectrum();

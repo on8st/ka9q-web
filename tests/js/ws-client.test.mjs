@@ -279,3 +279,40 @@ function readAudioMetaFixture() {
   buf.set(tlv, 12);
   return buf.buffer;
 }
+
+test("queryZoomTableSize() sends raw Z:SIZE, NOT wrapped in the C: envelope", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  client.clientId = "ctest";
+  const { sent, ws } = mockSocket();
+  client._ws = ws;
+  client.queryZoomTableSize();
+  assert.deepEqual(sent, ["Z:SIZE"]);
+});
+
+test("ZSIZE:<n> populates client.zoomTableSize and fires a zoomTableSize event", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  let detail = null;
+  client.addEventListener("zoomTableSize", (e) => { detail = e.detail; });
+  client._onTextMessage("ZSIZE:16");
+  assert.equal(client.zoomTableSize, 16);
+  assert.deepEqual(detail, { size: 16 });
+});
+
+test("setZoomLevel()/zoomStep()/zoomCenter() send the documented Z: commands wrapped in the C: envelope", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  client.clientId = "ctest";
+  const { sent, ws } = mockSocket();
+  client._ws = ws;
+
+  client.setZoomLevel(4);
+  client.zoomStep(1, 145_500_000);
+  client.zoomStep(-1, 145_500_000);
+  client.zoomCenter(145_500_000);
+
+  assert.deepEqual(sent, [
+    "C:ctest:1:Z:4",
+    "C:ctest:2:Z:+:145500.000",
+    "C:ctest:3:Z:-:145500.000",
+    "C:ctest:4:Z:c:145500.000",
+  ]);
+});

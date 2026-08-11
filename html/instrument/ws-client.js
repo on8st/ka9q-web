@@ -45,6 +45,7 @@ export class Ka9qWebClient extends EventTarget {
     this.mode = null;
     this.ssrc = null; // from the server's own "S:<ssrc>" text message - required for every A:/O: audio command
     this.audioOutput = null; // { samprate, channels, encoding }, from OUTPUT_SAMPRATE/OUTPUT_CHANNELS/OUTPUT_ENCODING TLV fields - authoritative for PCM playback config, see audio.js
+    this.zoomTableSize = null; // from "ZSIZE:<n>", the reply to a raw "Z:SIZE" query - number of valid zoom-table indices for this front end (radio.js's fetchZoomTableSize())
     this._fields = new Map();
     this._ws = null;
   }
@@ -63,6 +64,7 @@ export class Ka9qWebClient extends EventTarget {
       // after a short delay so the STOP is processed first.
       this._sendRaw("S:STOP");
       setTimeout(() => this._sendRaw("S:"), 80);
+      this.queryZoomTableSize();
       this.dispatchEvent(new Event("open"));
     });
     this._ws.addEventListener("close", () => this.dispatchEvent(new Event("close")));
@@ -80,6 +82,36 @@ export class Ka9qWebClient extends EventTarget {
    * receives data but stops drawing it). */
   startSpectrum() { this._sendRaw("S:"); }
   stopSpectrum() { this._sendRaw("S:STOP"); }
+
+  /** Queries how many zoom-table entries this front end has - reply
+   * arrives as a "ZSIZE:<n>" text message (_onTextMessage). Sent raw, not
+   * wrapped - ported from radio.js's getZoomTableSize(), which also
+   * bypasses sendControl()'s C: envelope for this one query. */
+  queryZoomTableSize() { this._sendRaw("Z:SIZE"); }
+
+  /** Selects a zoom-table entry by its integer index (0..zoomTableSize-1),
+   * NOT a target span/Hz-per-bin value - the index maps 1:1 onto the
+   * server's own zoom_table[] (ka9q-web.c), same array the "Zoom level"
+   * slider drives in radio.js (setZoom()). */
+  setZoomLevel(index) {
+    this._sendCommand(`Z:${index}`);
+  }
+
+  /** Relative zoom step, ported from radio.js's zoomin()/zoomout() -
+   * these carry the currently-tuned frequency so the server can re-center
+   * while stepping. direction: +1 to zoom in, -1 to zoom out. */
+  zoomStep(direction, freqHz) {
+    const khz = (Math.round(freqHz) / 1000.0).toFixed(3);
+    this._sendCommand(`Z:${direction > 0 ? "+" : "-"}:${khz}`);
+  }
+
+  /** Re-centers the zoom window on the given frequency without changing
+   * zoom level - ported from radio.js's zoomcenter() ("Zoom Center"
+   * button; ka9q-web.c's Z:c: handler). */
+  zoomCenter(freqHz) {
+    const khz = (Math.round(freqHz) / 1000.0).toFixed(3);
+    this._sendCommand(`Z:c:${khz}`);
+  }
 
   /** S:/S:STOP are sent raw, NOT wrapped in the C:<clientId>:<seq>:
    * envelope every other outbound command uses - confirmed against
@@ -193,6 +225,14 @@ export class Ka9qWebClient extends EventTarget {
     }
     if (text.startsWith("BUSY:")) {
       this.dispatchEvent(new CustomEvent("busy", { detail: { reason: text.slice(5).trim() } }));
+      return;
+    }
+    if (text.startsWith("ZSIZE:")) {
+      const n = parseInt(text.slice(6), 10);
+      if (Number.isFinite(n)) {
+        this.zoomTableSize = n;
+        this.dispatchEvent(new CustomEvent("zoomTableSize", { detail: { size: n } }));
+      }
       return;
     }
     // S:<ssrc> - this session's numeric SSRC, needed to address every
