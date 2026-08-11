@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   dbToColor, binIndexForPixel, hzForPixel, pixelForHz,
   clampSpectrumPercent, SPECTRUM_PERCENT_MIN, SPECTRUM_PERCENT_MAX,
+  measureAutoscaleRange,
 } from "../../html/instrument/spectrum-canvas.js";
 
 test("dbToColor clamps to the first/last heatmap stops at the range ends", () => {
@@ -74,4 +75,17 @@ test("clampSpectrumPercent clamps to [MIN, MAX] (\"spectrum display size\" +/- b
   assert.equal(clampSpectrumPercent(0), SPECTRUM_PERCENT_MIN);
   assert.equal(clampSpectrumPercent(100), SPECTRUM_PERCENT_MAX);
   assert.equal(clampSpectrumPercent(50), 50);
+});
+
+test("measureAutoscaleRange (\"Autoscale\" button) fits min/max to the given bins, ceiling rounded up to a 5 dB step", () => {
+  const bins = new Float32Array([-90, -85, -40, -60]);
+  const { minDb, maxDb } = measureAutoscaleRange(bins);
+  assert.equal(minDb, -90 - 6); // AUTOSCALE_FLOOR_PADDING_DB
+  assert.equal(maxDb, -40); // already a multiple of 5
+});
+
+test("measureAutoscaleRange rounds a non-multiple-of-5 peak up, never down", () => {
+  const bins = new Float32Array([-80, -37]);
+  const { maxDb } = measureAutoscaleRange(bins);
+  assert.equal(maxDb, -35); // ceil(-37/5)*5 = -35, not -40
 });

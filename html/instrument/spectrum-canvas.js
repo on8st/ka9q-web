@@ -75,6 +75,27 @@ function loadSpectrumPercent() {
   return Number.isFinite(raw) && raw > 0 ? clampSpectrumPercent(raw) : SPECTRUM_PERCENT_DEFAULT;
 }
 
+// "Spectrum autoscale" (stock: autoscale button, Spectrum.prototype.
+// measureMinMax()) - a one-shot fit-to-current-data snapshot, not a
+// continuous mode (unlike this UI's own always-on smoothed autorange
+// above). Ported simplified: real min/max of the current bins, max
+// rounded up to the next 5 dB step (stock's own rounding), min padded by
+// a few dB of headroom so the trace isn't flush against the bottom edge.
+const AUTOSCALE_FLOOR_PADDING_DB = 6;
+
+export function measureAutoscaleRange(binsDb) {
+  let min = Infinity;
+  let max = -Infinity;
+  for (let i = 0; i < binsDb.length; i++) {
+    if (binsDb[i] < min) min = binsDb[i];
+    if (binsDb[i] > max) max = binsDb[i];
+  }
+  return {
+    minDb: min - AUTOSCALE_FLOOR_PADDING_DB,
+    maxDb: Math.ceil(max / 5) * 5,
+  };
+}
+
 // How fast the autorange floor/ceiling adapts to the real incoming data
 // (0 = never moves, 1 = snaps instantly to the latest frame). Smoothed
 // rather than snapping so the display doesn't flicker frame to frame.
@@ -144,6 +165,46 @@ export function createSpectrumDisplay(container) {
     if (manualRange) return manualRange;
     if (smoothMinDb === null) return { minDb: -100, maxDb: -20 };
     return { minDb: smoothMinDb - AUTORANGE_PADDING_DB, maxDb: smoothMaxDb + AUTORANGE_PADDING_DB };
+  }
+
+  function setRangeInternal(minDb, maxDb) {
+    manualRange = { minDb, maxDb };
+    if (!paused) draw();
+  }
+
+  /** Ported from stock's Autoscale button: snapshot-fits the range to
+   * whatever's in the last received frame right now, then holds it there
+   * (a one-shot fixed range, same as manually setting one - not this UI's
+   * usual continuous smoothing, matching stock's own one-shot behaviour). */
+  function forceAutoscale() {
+    if (!lastSpectrum) return;
+    const { minDb, maxDb } = measureAutoscaleRange(lastSpectrum.binsDb);
+    setRangeInternal(minDb, maxDb);
+  }
+
+  /** Ported from stock's baseline_up/baseline_down buttons: nudge the
+   * floor (min_db) by 5 dB, independent of the ceiling. Materializes the
+   * current (possibly still auto-computed) range into a fixed one first,
+   * same as stock always operating on a concrete min_db/max_db pair. */
+  function baselineUp() {
+    const { minDb, maxDb } = currentRange();
+    setRangeInternal(minDb - 5, maxDb);
+  }
+  function baselineDown() {
+    const { minDb, maxDb } = currentRange();
+    setRangeInternal(minDb + 5, maxDb);
+  }
+
+  /** Ported from stock's rangeinc/rangedec buttons: nudge the ceiling
+   * (max_db) by 5 dB. rangeDecrease refuses to shrink below a 10 dB span,
+   * matching stock exactly. */
+  function rangeIncrease() {
+    const { minDb, maxDb } = currentRange();
+    setRangeInternal(minDb, maxDb + 5);
+  }
+  function rangeDecrease() {
+    const { minDb, maxDb } = currentRange();
+    if (maxDb - minDb > 10) setRangeInternal(minDb, maxDb - 5);
   }
 
   function draw() {
@@ -246,7 +307,7 @@ export function createSpectrumDisplay(container) {
       if (!paused) draw();
     },
     resize,
-    setRange: (minDb, maxDb) => { manualRange = { minDb, maxDb }; if (!paused) draw(); },
+    setRange: setRangeInternal,
     getRange: () => currentRange(),
     clearManualRange: () => { manualRange = null; },
     setPaused: (v) => { paused = v; },
@@ -257,6 +318,11 @@ export function createSpectrumDisplay(container) {
     getSpectrumPercent: () => spectrumPercent,
     incrementSpectrumPercent: () => setSpectrumPercent(spectrumPercent + SPECTRUM_PERCENT_STEP),
     decrementSpectrumPercent: () => setSpectrumPercent(spectrumPercent - SPECTRUM_PERCENT_STEP),
+    forceAutoscale,
+    baselineUp,
+    baselineDown,
+    rangeIncrease,
+    rangeDecrease,
     canvas,
   };
 }

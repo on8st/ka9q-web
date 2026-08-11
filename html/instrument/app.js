@@ -305,6 +305,11 @@ $("zoom-out").addEventListener("click", () => { if (currentFreqHz !== null) clie
 $("zoom-center").addEventListener("click", () => { if (currentFreqHz !== null) client.zoomCenter(currentFreqHz); });
 $("spectrum-size-up").addEventListener("click", () => spectrumDisplay.incrementSpectrumPercent());
 $("spectrum-size-down").addEventListener("click", () => spectrumDisplay.decrementSpectrumPercent());
+$("range-autoscale").addEventListener("click", () => spectrumDisplay.forceAutoscale());
+$("baseline-up").addEventListener("click", () => spectrumDisplay.baselineUp());
+$("baseline-down").addEventListener("click", () => spectrumDisplay.baselineDown());
+$("range-inc").addEventListener("click", () => spectrumDisplay.rangeIncrease());
+$("range-dec").addEventListener("click", () => spectrumDisplay.rangeDecrease());
 
 function renderTelemetry() {
   const s = spectrumDisplay.getLastSpectrum();

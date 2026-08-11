@@ -390,3 +390,43 @@ as out of scope for its pass - researched and derived fresh from
   card, not the main instrument bar - these are setup-once adjustments,
   not per-tune interaction, matching the brief's "rare things are one
   action away" philosophy already applied to telemetry/pause/export.
+
+## Autoscale + baseline/ceiling adjust (2026-08-11)
+
+Researched `html/spectrum.js`'s `forceAutoscale()`/`measureMinMax()`/
+`baselineUp()`/`baselineDown()`/`rangeIncrease()`/`rangeDecrease()`
+before porting - all confirmed **purely client-side** (no WS traffic;
+stock only ever streams raw dB bins, never a range/autoscale concept).
+
+Two findings that changed scope from what the manifest literally lists:
+
+- **`freeze_min_max` doesn't do what its name suggests.** It only gates
+  whether the Max-Hold/Min-Hold *overlay trace arrays* keep updating -
+  those traces don't exist in this instrument UI at all yet (tracked
+  separately as "Max/min hold"). Porting a `freeze_min_max` checkbox now
+  would ship a control with nothing to freeze. Moved into the Max/min
+  hold task instead of building a dead checkbox here - see that task's
+  own notes when it lands.
+- **`ckonlyAutoscaleButton` doesn't map onto this UI's architecture.**
+  Stock's autorange is normally a *fixed* range that only moves when
+  autoscale/baseline/range buttons are pressed or something calls the
+  internal `autoAutoscale()` (span change, mode change, etc.) - the
+  checkbox suppresses just those automatic internal calls. This
+  instrument UI's `spectrum-canvas.js` already auto-ranges *continuously*
+  by design (`updateAutorange()`, every frame, `AUTORANGE_SMOOTHING`) -
+  there is no automatic-trigger call site for the checkbox to gate.
+  Left unbuilt as architecturally moot rather than added as an inert
+  control.
+
+What WAS ported, faithfully: `measureAutoscaleRange()` (real min/max of
+the current frame's bins, ceiling rounded up to a 5 dB step, stock's own
+rounding) backs a new `forceAutoscale()` - a one-shot snapshot-fit that
+then holds fixed via the existing `manualRange`, matching stock's actual
+behaviour (not this UI's usual continuous smoothing) exactly, just
+computed instantly instead of stock's 5-frame settle wait (there's
+nothing to wait for - the data is already in hand). `baselineUp/Down()`
+nudge the floor and `rangeIncrease/Decrease()` the ceiling by 5 dB each,
+both materializing whatever the current range is (auto or manual) into a
+fixed one first, same as stock always operating on a concrete pair of
+numbers. `rangeDecrease()` keeps stock's 10 dB minimum-span guard. New
+"Range" row in the drawer's "Spectrum display" card.
