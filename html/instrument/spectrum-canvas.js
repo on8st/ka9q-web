@@ -518,6 +518,7 @@ export function createSpectrumDisplay(container) {
     setShowLive,
     setShowMaxTrace,
     setShowMinTrace,
+    __debugGetHoldArrays: () => ({ binsMax: binsMax && Array.from(binsMax.slice(0, 10)), binsMin: binsMin && Array.from(binsMin.slice(0, 10)), showMaxTrace, showMinTrace }),
     canvas,
   };
 }
