@@ -510,6 +510,21 @@ held everywhere:
   autoscale task, see that task's notes on why) now has something real
   to freeze: it skips the `processFrame()` update loop entirely while
   checked, exactly matching stock's per-frame skip.
+- Verified live, not just by eye: the min-hold trace initially looked
+  completely absent on a live receiver even with real, correctly-varying
+  values confirmed via a temporary debug hook (`__debugGetHoldArrays()`,
+  removed before the final commit) - turned out to be genuinely rendering,
+  just a single pixel row exactly at the trace/waterfall boundary
+  (`y = Math.floor(splitY)`), outside a naive `y < Math.floor(h*0.46)`
+  pixel-scan range used to check it. Root cause of the *visual* subtlety
+  itself (not a bug, an architecture interaction worth knowing): this
+  UI's `minDb` continuously auto-tracks the noise floor (unlike stock's
+  normally-fixed range), and the min-hold value is *also* the historical
+  noise-floor minimum - the two naturally converge, so the min-hold line
+  often sits right on the bottom axis rather than visibly separating from
+  it the way it would against a fixed range. Confirmed correctly
+  computed and drawn either way; left as-is rather than "fixed" against
+  a symptom that isn't actually wrong.
 - New "FFT & hold" drawer card holds all six controls - the most
   control-dense card in this UI so far, but every one of them is a
   genuine "set it once and forget it" tuning knob, squarely fitting the

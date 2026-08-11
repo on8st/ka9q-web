@@ -36,7 +36,6 @@ const client = new Ka9qWebClient(
 // ---- Spectrum/waterfall: fills #display-area, per "the receiver fills
 // the screen" (brief section 4). ----
 const spectrumDisplay = createSpectrumDisplay($("display-area"));
-window.__debugSpectrum = spectrumDisplay;
 client.addEventListener("spectrum", (e) => {
   const abs = absoluteCenterHz(e.detail, frontendFrequencyHz);
   spectrumDisplay.render({ ...e.detail, centerHz: abs });
