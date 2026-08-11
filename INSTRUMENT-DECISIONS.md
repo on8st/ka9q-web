@@ -464,3 +464,53 @@ default colormap index 9 ("kiwi"), matching stock's own default. New
 "Colormap" row in the drawer's "Spectrum display" card: a `<select>`
 built from `COLORMAP_NAMES` (same order/labels as stock) plus the bias
 number input.
+
+## FFT averaging, max/min hold, window, overlap, poll rate (2026-08-11)
+
+The biggest single research pass of this whole build - six features,
+and unlike most of the earlier ones, several of these are **real
+server-side commands**, not client-only cosmetics. Checked each one
+individually rather than assuming the "spectrum display size" pattern
+held everywhere:
+
+- **`fft_avg_input` (client EMA) vs `spectrum_average_input` (real
+  `g:<n>` command, radiod's own `SPECTRUM_AVG`)** are two DIFFERENT
+  features despite the near-identical names - confirmed by grepping for
+  `sendControl` near each handler individually rather than assuming
+  both behave the same way. Both ported: `alphaForAveraging()`/
+  `emaStep()` for the client one (applied in `processFrame()`, feeding
+  both the trace and the waterfall - matching stock, where averaging
+  happens before either consumes the bins), `client.setSpectrumAverage()`
+  for the real one.
+- **Window type/shape (`w:<TYPE>:<PARAM>`) and spectrum overlap
+  (`v:<float>`)** are both real commands that reach radiod's own status
+  protocol (`WINDOW_TYPE`/`SPECTRUM_SHAPE`/`SPECTRUM_OVERLAP` TLV tags,
+  confirmed against `status.h`, not invented). Window type is sent as
+  the enum NAME string (`"KAISER_WINDOW"` etc, matching
+  `ka9q-web.c`'s `control_set_window_type()` string mapping), not an
+  index.
+- **Spectrum poll rate (`r:<ms>`) is real but doesn't reach radiod at
+  all** - it sets `sp->spectrum_poll_us` directly on the ka9q-web
+  session struct, changing how often *ka9q-web itself* polls radiod for
+  fresh spectrum data (`spectrum_thread()`, `ka9q-web.c`), not any FFT
+  parameter inside radiod. Ported anyway since it's a real, working
+  control the manifest lists - just documented here so it isn't
+  mistaken for another radiod-side knob.
+- **Max/min hold is the only one of the six that's still 100%
+  client-side** - `binsMax`/`binsMin` per-bin hold arrays, updated once
+  per frame in `processFrame()` via `updateHoldValue()`, ported exactly
+  from `Spectrum.prototype.drawSpectrum()`'s two loops including a
+  faithfully-preserved quirk: **min-hold never decays** (stock's own
+  min-hold branch is `this.binsMin[i] = this.binsMin[i]`, a literal
+  no-op - the `decay_list` dropdown only ever affects the max-hold
+  trace). `check_live` draws the live trace **unconditionally** (not
+  gated by `max_hold`), while `check_max`/`check_min` require BOTH
+  `max_hold` enabled AND their own checkbox - ported as the same
+  double-gate in `draw()`. `freeze_min_max` (moved here from the
+  autoscale task, see that task's notes on why) now has something real
+  to freeze: it skips the `processFrame()` update loop entirely while
+  checked, exactly matching stock's per-frame skip.
+- New "FFT & hold" drawer card holds all six controls - the most
+  control-dense card in this UI so far, but every one of them is a
+  genuine "set it once and forget it" tuning knob, squarely fitting the
+  brief's "rare things" philosophy even more than the earlier cards.

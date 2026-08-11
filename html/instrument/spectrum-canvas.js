@@ -32,6 +32,31 @@ export function pickColormapColor(cmap, scaled) {
   return cmap[idx] || cmap[cmap.length - 1] || [0, 0, 0];
 }
 
+// "FFT averaging amount" (stock: fft_avg_input, Spectrum.prototype.
+// setAveraging()/drawSpectrum()) - a CLIENT-SIDE exponential moving
+// average of the already-received bins, distinct from the real wire
+// command "spectrum_average_input" sends (ws-client.js's
+// setSpectrumAverage(), server-side radiod averaging - a different
+// feature despite the similar name, confirmed by research before
+// porting: only one of the two ever touches the WS).
+export function alphaForAveraging(n) {
+  return 2 / (n + 1);
+}
+
+export function emaStep(prev, raw, alpha) {
+  return prev + alpha * (raw - prev);
+}
+
+// "Max/min hold" (stock: max_hold/check_max/check_min/check_live/
+// decay_list) - per-bin hold-trace update, ported exactly from
+// Spectrum.prototype.drawSpectrum()'s two update loops. Min-hold's
+// "decay" is a deliberate no-op in stock (min-hold never decays, only
+// max-hold does, via decay_list) - ported faithfully, not a bug.
+export function updateHoldValue(prev, raw, decay, isMax) {
+  if (isMax) return raw > prev ? raw : decay * prev;
+  return raw < prev ? raw : prev;
+}
+
 export function dbToColor(db, minDb, maxDb) {
   const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
   const scaled = t * (HEATMAP_STOPS.length - 1);
@@ -220,6 +245,62 @@ export function createSpectrumDisplay(container) {
     return pickColormapColor(cmap, scaled);
   }
 
+  // "FFT averaging amount" - client-side EMA, applied before the trace/
+  // waterfall are drawn (both consume the averaged bins, matching stock -
+  // see alphaForAveraging()'s header comment for the real-wire-command
+  // sibling this is NOT).
+  let fftAveraging = 1; // 1 = no smoothing, matches the stock input's min
+  let binsAverage = null; // Float32Array, lazily (re)sized to match binCount
+
+  function setFftAveraging(n) {
+    fftAveraging = Math.max(1, Number(n) || 1);
+  }
+
+  // "Max/min hold" state - ported from Spectrum.prototype's maxHold/
+  // decay/freezeMinMax/binsMax/binsMin (see updateHoldValue() above).
+  let maxHoldEnabled = true; // stock default (radio.js's setDefaultSettings())
+  let holdDecay = 1; // "Infinite" - stock default
+  let freezeMinMax = false;
+  let showLive = true;
+  let showMaxTrace = false;
+  let showMinTrace = false;
+  let binsMax = null;
+  let binsMin = null;
+
+  function setMaxHoldEnabled(v) {
+    maxHoldEnabled = !!v;
+    binsMax = null; // reseed fresh next frame, matches stock's setMaxHold()
+    binsMin = null;
+  }
+  function setHoldDecay(v) { holdDecay = Number(v) || 1; }
+  function setFreezeMinMax(v) { freezeMinMax = !!v; }
+  function setShowLive(v) { showLive = !!v; if (!paused) draw(); }
+  function setShowMaxTrace(v) { showMaxTrace = !!v; if (!paused) draw(); }
+  function setShowMinTrace(v) { showMinTrace = !!v; if (!paused) draw(); }
+
+  /** Applies FFT averaging then, if enabled, updates the max/min-hold
+   * arrays - once per incoming frame, before drawing. Returns the bins
+   * the trace/waterfall should actually render (the averaged ones). */
+  function processFrame(binsDb) {
+    if (!binsAverage || binsAverage.length !== binsDb.length) {
+      binsAverage = Float32Array.from(binsDb);
+    } else {
+      const alpha = alphaForAveraging(fftAveraging);
+      for (let i = 0; i < binsDb.length; i++) binsAverage[i] = emaStep(binsAverage[i], binsDb[i], alpha);
+    }
+    if (maxHoldEnabled) {
+      if (!binsMax || binsMax.length !== binsAverage.length) binsMax = Float32Array.from(binsAverage);
+      if (!binsMin || binsMin.length !== binsAverage.length) binsMin = Float32Array.from(binsAverage);
+      if (!freezeMinMax) {
+        for (let i = 0; i < binsAverage.length; i++) {
+          binsMax[i] = updateHoldValue(binsMax[i], binsAverage[i], holdDecay, true);
+          binsMin[i] = updateHoldValue(binsMin[i], binsAverage[i], holdDecay, false);
+        }
+      }
+    }
+    return binsAverage;
+  }
+
   function updateAutorange(binsDb) {
     let min = Infinity;
     let max = -Infinity;
@@ -284,7 +365,8 @@ export function createSpectrumDisplay(container) {
 
   function draw() {
     if (!lastSpectrum) return;
-    const { binsDb, centerHz, binWidthHz, binCount } = lastSpectrum;
+    const { centerHz, binWidthHz, binCount } = lastSpectrum;
+    const binsDb = binsAverage || lastSpectrum.binsDb; // FFT-averaged trace/waterfall source (see processFrame())
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.width;
     const h = canvas.height;
@@ -322,28 +404,50 @@ export function createSpectrumDisplay(container) {
       ctx.putImageData(row, 0, wfTop);
     }
 
-    // Trace, filled below the line (matches the mockup's phosphor-green look).
-    ctx.beginPath();
-    ctx.moveTo(0, splitY);
-    for (let x = 0; x < w; x++) {
-      const db = binsDb[binIndexForPixel(x, w, binCount)];
-      const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
-      ctx.lineTo(x, splitY - t * (splitY - 14));
+    // Trace, filled below the line (matches the mockup's phosphor-green
+    // look). "Live" trace visibility (check_live) - drawn regardless of
+    // maxHoldEnabled, matching stock exactly (only Max/Min are gated by it).
+    if (showLive) {
+      ctx.beginPath();
+      ctx.moveTo(0, splitY);
+      for (let x = 0; x < w; x++) {
+        const db = binsDb[binIndexForPixel(x, w, binCount)];
+        const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
+        ctx.lineTo(x, splitY - t * (splitY - 14));
+      }
+      ctx.lineTo(w, splitY);
+      ctx.closePath();
+      ctx.fillStyle = "rgba(75,224,138,0.10)";
+      ctx.fill();
+      ctx.beginPath();
+      for (let x = 0; x < w; x++) {
+        const db = binsDb[binIndexForPixel(x, w, binCount)];
+        const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
+        const y = splitY - t * (splitY - 14);
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = "#4BE08A";
+      ctx.lineWidth = 1;
+      ctx.stroke();
     }
-    ctx.lineTo(w, splitY);
-    ctx.closePath();
-    ctx.fillStyle = "rgba(75,224,138,0.10)";
-    ctx.fill();
-    ctx.beginPath();
-    for (let x = 0; x < w; x++) {
-      const db = binsDb[binIndexForPixel(x, w, binCount)];
-      const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
-      const y = splitY - t * (splitY - 14);
-      if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+
+    // Max/Min hold overlay traces - both gated on maxHoldEnabled AND their
+    // own visibility checkbox, exactly matching stock's
+    // `(this.maxHold) && (check_max.checked)` / same for check_min.
+    function strokeHoldTrace(arr, color) {
+      ctx.beginPath();
+      for (let x = 0; x < w; x++) {
+        const db = arr[binIndexForPixel(x, w, binCount)];
+        const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
+        const y = splitY - t * (splitY - 14);
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.stroke();
     }
-    ctx.strokeStyle = "#4BE08A";
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    if (maxHoldEnabled && showMaxTrace && binsMax) strokeHoldTrace(binsMax, "#ffff00");
+    if (maxHoldEnabled && showMinTrace && binsMin) strokeHoldTrace(binsMin, "#ff0000");
 
     // Tuned-frequency band, spanning the full height (matches the mockup).
     if (tunedFreqHz !== null) {
@@ -379,6 +483,7 @@ export function createSpectrumDisplay(container) {
     render: (spectrum) => {
       lastSpectrum = spectrum;
       updateAutorange(spectrum.binsDb);
+      processFrame(spectrum.binsDb); // once per real frame only - draw() must never re-run this (see its own call sites)
       if (!paused) draw();
     },
     resize,
@@ -402,6 +507,17 @@ export function createSpectrumDisplay(container) {
     getWaterfallBias: () => waterfallBias,
     setColorIndex,
     getColorIndex: () => colorIndex,
+    setFftAveraging,
+    getFftAveraging: () => fftAveraging,
+    setMaxHoldEnabled,
+    isMaxHoldEnabled: () => maxHoldEnabled,
+    setHoldDecay,
+    getHoldDecay: () => holdDecay,
+    setFreezeMinMax,
+    isFreezeMinMax: () => freezeMinMax,
+    setShowLive,
+    setShowMaxTrace,
+    setShowMinTrace,
     canvas,
   };
 }

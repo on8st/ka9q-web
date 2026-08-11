@@ -317,6 +317,37 @@ $("colormap-select").addEventListener("change", (e) => spectrumDisplay.setColorI
 $("waterfall-bias").value = String(spectrumDisplay.getWaterfallBias());
 $("waterfall-bias").addEventListener("change", (e) => spectrumDisplay.setWaterfallBias(e.target.value));
 
+// ---- FFT & hold: trace averaging (client-only) + server-side FFT
+// averaging/window/overlap/poll rate (real wire commands) + max/min hold
+// (client-only trace overlays). ----
+$("fft-avg").value = String(spectrumDisplay.getFftAveraging());
+$("fft-avg").addEventListener("change", (e) => spectrumDisplay.setFftAveraging(e.target.value));
+$("spectrum-avg-send").addEventListener("click", () => {
+  const v = Number($("spectrum-avg").value);
+  if (Number.isFinite(v) && v > 0) client.setSpectrumAverage(v);
+});
+$("max-hold-enable").checked = spectrumDisplay.isMaxHoldEnabled();
+$("max-hold-enable").addEventListener("change", (e) => spectrumDisplay.setMaxHoldEnabled(e.target.checked));
+$("show-live").addEventListener("change", (e) => spectrumDisplay.setShowLive(e.target.checked));
+$("show-max").addEventListener("change", (e) => spectrumDisplay.setShowMaxTrace(e.target.checked));
+$("show-min").addEventListener("change", (e) => spectrumDisplay.setShowMinTrace(e.target.checked));
+$("freeze-min-max").addEventListener("change", (e) => spectrumDisplay.setFreezeMinMax(e.target.checked));
+$("hold-decay").value = String(spectrumDisplay.getHoldDecay());
+$("hold-decay").addEventListener("change", (e) => spectrumDisplay.setHoldDecay(e.target.value));
+$("window-send").addEventListener("click", () => {
+  const type = $("window-type").value;
+  const param = $("window-param").value;
+  client.setWindow(type, param || 0);
+});
+$("spectrum-overlap-send").addEventListener("click", () => {
+  const v = Number($("spectrum-overlap").value);
+  if (Number.isFinite(v) && v >= 0 && v < 1) client.setSpectrumOverlap(v);
+});
+$("spectrum-poll-send").addEventListener("click", () => {
+  const v = Number($("spectrum-poll").value);
+  if (Number.isFinite(v) && v > 0) client.setSpectrumPollRate(v);
+});
+
 function renderTelemetry() {
   const s = spectrumDisplay.getLastSpectrum();
   $("tele").innerHTML = s ? `

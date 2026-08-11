@@ -6,6 +6,7 @@ import {
   measureAutoscaleRange, pickColormapColor, COLORMAP_NAMES,
   loadSpectrumPercent, loadWaterfallBias, loadColorIndex,
   SPECTRUM_PERCENT_DEFAULT, WATERFALL_BIAS_DEFAULT, COLORMAP_DEFAULT_INDEX,
+  alphaForAveraging, emaStep, updateHoldValue,
 } from "../../html/instrument/spectrum-canvas.js";
 
 // Fake localStorage - a real empty store, not a global shim, since these
@@ -138,4 +139,36 @@ test("loadSpectrumPercent/loadWaterfallBias/loadColorIndex read back a real stor
   assert.equal(loadSpectrumPercent(fakeStorage({ instrument_spectrum_percent: "70" })), 70);
   assert.equal(loadWaterfallBias(fakeStorage({ instrument_waterfall_bias: "-3" })), -3);
   assert.equal(loadColorIndex(fakeStorage({ instrument_colormap_index: "5" })), 5);
+});
+
+test("alphaForAveraging(1) is 1 (no smoothing - matches the input's min=1)", () => {
+  assert.equal(alphaForAveraging(1), 1);
+});
+
+test("alphaForAveraging increases smoothing (smaller alpha) as the averaging count grows", () => {
+  assert.ok(alphaForAveraging(50) < alphaForAveraging(10));
+  assert.ok(alphaForAveraging(10) < alphaForAveraging(1));
+});
+
+test("emaStep with alpha=1 snaps straight to the new value (no smoothing)", () => {
+  assert.equal(emaStep(-80, -40, 1), -40);
+});
+
+test("emaStep with alpha<1 moves partway toward the new value", () => {
+  const next = emaStep(-80, -40, 0.5);
+  assert.equal(next, -60);
+});
+
+test("updateHoldValue (max) tracks new peaks instantly and decays otherwise ('Max/min hold')", () => {
+  assert.equal(updateHoldValue(-60, -40, 1, true), -40); // new peak - snap up
+  assert.equal(updateHoldValue(-40, -60, 1, true), -40); // decay=1 ("Infinite") - no decay at all
+  // decay_list's real options are all >= 1 (e.g. 1.05) - multiplying a
+  // negative dB value by >1 makes it MORE negative, i.e. decays downward
+  // toward the noise floor over successive frames.
+  assert.equal(updateHoldValue(-40, -60, 1.05, true), -42);
+});
+
+test("updateHoldValue (min) tracks new troughs instantly and NEVER decays (ported exactly, not a bug)", () => {
+  assert.equal(updateHoldValue(-40, -60, 1, false), -60); // new trough - snap down
+  assert.equal(updateHoldValue(-60, -40, 0.5, false), -60); // no new trough - value unchanged regardless of "decay"
 });

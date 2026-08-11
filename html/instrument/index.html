@@ -199,6 +199,33 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
         <div class="prow"><span class="cap" style="min-width:52px">Colormap</span><select class="k" id="colormap-select"></select><input type="number" class="k num" id="waterfall-bias" step="1" title="Waterfall bias, decrease to lighten"></div>
       </div>
     </div>
+    <div class="card"><div class="hd"><span class="silk">FFT &amp; hold</span></div>
+      <div class="bd">
+        <div class="prow"><span class="cap" style="min-width:90px">Trace averaging</span><input type="number" class="k num" id="fft-avg" min="1" max="50" step="1" title="Client-side trace smoothing"></div>
+        <div class="prow"><span class="cap" style="min-width:90px">FFT averaging</span><input type="number" class="k num" id="spectrum-avg" min="1" max="150" step="1" title="Server-side FFT averaging"><button class="k mini" id="spectrum-avg-send">Send</button></div>
+        <div class="prow"><label class="chk"><input type="checkbox" id="max-hold-enable"> Max/min hold</label></div>
+        <div class="prow">
+          <label class="chk"><input type="checkbox" id="show-live" checked> Live</label>
+          <label class="chk"><input type="checkbox" id="show-max"> Max</label>
+          <label class="chk"><input type="checkbox" id="show-min"> Min</label>
+          <label class="chk"><input type="checkbox" id="freeze-min-max"> Freeze</label>
+        </div>
+        <div class="prow"><span class="cap" style="min-width:90px">Max decay</span><select class="k" id="hold-decay">
+          <option value="1">Infinite</option><option value="1.0001">1.0001</option><option value="1.0005">1.0005</option>
+          <option value="1.001">1.001</option><option value="1.005">1.005</option><option value="1.01">1.01</option>
+          <option value="1.05">1.05</option><option value="1.1">1.1</option>
+        </select></div>
+        <div class="prow"><span class="cap" style="min-width:90px">Window</span><select class="k" id="window-type">
+          <option value="KAISER_WINDOW">Kaiser</option><option value="RECT_WINDOW">Rectangular</option>
+          <option value="BLACKMAN_WINDOW">Blackman</option><option value="EXACT_BLACKMAN_WINDOW">Exact Blackman</option>
+          <option value="GAUSSIAN_WINDOW">Gaussian</option><option value="HANN_WINDOW">Hann</option>
+          <option value="HAMMING_WINDOW">Hamming</option><option value="BLACKMAN_HARRIS_WINDOW">Blackman-Harris</option>
+          <option value="HP5FT_WINDOW">HP5FT</option>
+        </select><input type="number" class="k num" id="window-param" step="0.1" min="0" max="15" title="Kaiser beta / Gaussian alpha"><button class="k mini" id="window-send">Send</button></div>
+        <div class="prow"><span class="cap" style="min-width:90px">FFT overlap</span><input type="number" class="k num" id="spectrum-overlap" step="0.01" min="0" max="0.99"><button class="k mini" id="spectrum-overlap-send">Send</button></div>
+        <div class="prow"><span class="cap" style="min-width:90px">Poll rate (ms)</span><input type="number" class="k num" id="spectrum-poll" min="30" max="2000" step="10" value="100"><button class="k mini" id="spectrum-poll-send">Send</button></div>
+      </div>
+    </div>
     <div class="card"><div class="hd"><span class="silk">Data &amp; notes</span></div>
       <div class="bd">
         <div class="prow"><button class="k mini" id="export-csv">Download current spectrum (CSV)</button></div>

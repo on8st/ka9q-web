@@ -316,3 +316,22 @@ test("setZoomLevel()/zoomStep()/zoomCenter() send the documented Z: commands wra
     "C:ctest:4:Z:c:145500.000",
   ]);
 });
+
+test("setSpectrumAverage()/setWindow()/setSpectrumOverlap()/setSpectrumPollRate() send the documented single-letter commands wrapped in C:", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  client.clientId = "ctest";
+  const { sent, ws } = mockSocket();
+  client._ws = ws;
+
+  client.setSpectrumAverage(25);
+  client.setWindow("KAISER_WINDOW", 8.5);
+  client.setSpectrumOverlap(0.5);
+  client.setSpectrumPollRate(200);
+
+  assert.deepEqual(sent, [
+    "C:ctest:1:g:25",
+    "C:ctest:2:w:KAISER_WINDOW:8.5",
+    "C:ctest:3:v:0.5",
+    "C:ctest:4:r:200",
+  ]);
+});

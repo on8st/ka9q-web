@@ -113,6 +113,37 @@ export class Ka9qWebClient extends EventTarget {
     this._sendCommand(`Z:c:${khz}`);
   }
 
+  /** Server-side FFT averaging count (radiod's own SPECTRUM_AVG, not the
+   * client-side EMA "FFT averaging amount" fft_avg_input drives - that
+   * one never touches the wire, see spectrum-canvas.js). Ported from
+   * radio.js's setupSpectrumAvgInput() -> 'g:<n>'. */
+  setSpectrumAverage(n) {
+    this._sendCommand(`g:${Math.round(n)}`);
+  }
+
+  /** FFT window type + shape parameter (Kaiser beta / Gaussian alpha).
+   * Ported from radio.js's sendWindowParameter() -> 'w:<TYPE>:<PARAM>'.
+   * `windowType` is the enum NAME string (e.g. "KAISER_WINDOW"), matching
+   * ka9q-web.c's control_set_window_type() string mapping, not an index. */
+  setWindow(windowType, param) {
+    this._sendCommand(`w:${windowType}:${param}`);
+  }
+
+  /** FFT window overlap fraction (0..1). Ported from radio.js's
+   * sendSpectrumOverlap() -> 'v:<float>'. */
+  setSpectrumOverlap(v) {
+    this._sendCommand(`v:${v}`);
+  }
+
+  /** How often (ms) ka9q-web itself polls radiod for fresh spectrum data
+   * for this session (ka9q-web-internal - sp->spectrum_poll_us, ported
+   * from radio.js's sendSpectrumPoll() -> 'r:<ms>'). Does NOT reach
+   * radiod's own FFT computation, unlike setSpectrumAverage/setWindow/
+   * setSpectrumOverlap above - it only changes how often ka9q-web asks. */
+  setSpectrumPollRate(ms) {
+    this._sendCommand(`r:${Math.round(ms)}`);
+  }
+
   /** S:/S:STOP are sent raw, NOT wrapped in the C:<clientId>:<seq>:
    * envelope every other outbound command uses - confirmed against
    * radio.js's own on_ws_open(), which calls ws.send("S:...") directly. */
