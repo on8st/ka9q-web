@@ -549,12 +549,22 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
       }
     }
 
-    // Tuned-frequency band, spanning the full height (matches the mockup).
+    // Tuned-frequency band. The thin marker line spans the full height
+    // (matches the mockup) as a persistent trail through the waterfall's
+    // scrolled history, showing tuning position over time. The translucent
+    // passband-width fill, however, must stay confined to the trace region
+    // (0..splitY): that region is fully repainted every frame, but the
+    // waterfall below only ever scrolls its existing pixels - anything
+    // drawn into it here gets redrawn onto the SAME still-visible rows on
+    // every subsequent frame, compounding the fill's alpha frame after
+    // frame until it turns into a solid, wide, opaque bar, and freezing
+    // into a permanent streak once those rows scroll out of view. That's
+    // what produced the too-wide, greyed-out remnants seen live (2026-08-11).
     if (tunedFreqHz !== null) {
       const x = pixelForHz(tunedFreqHz, w, centerHz, binWidthHz, binCount);
       if (x !== null) {
         ctx.fillStyle = "rgba(86,199,255,0.13)";
-        ctx.fillRect(x - w * 0.0175, 0, w * 0.035, h);
+        ctx.fillRect(x - w * 0.0175, 0, w * 0.035, splitY);
         ctx.strokeStyle = "#56C7FF";
         ctx.beginPath();
         ctx.moveTo(x, 0);
