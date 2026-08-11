@@ -699,3 +699,41 @@ pattern) and one needed real data-format reconciliation:
 **Parity manifest: 43/43 - every stock feature is now reachable in this
 instrument UI.** `tests/check-parity.mjs` confirms 0 manifest errors, 0
 features remaining unbuilt.
+
+## Default spectrum view: wrong centre and half the intended width on VHF/UHF (2026-08-11)
+
+Reported live: VHF didn't open centred on 145 MHz showing its full
+capture bandwidth. Root cause is the same class of bug already fixed
+once for the spectrum bin-order seam (`handle_bin_data()`,
+`PROTOCOL-SPECTRUM.md`) - a formula written for a real->complex FFT
+(HF's direct-sampling RX888) applied unconditionally to complex->complex
+front ends (VHF/UHF's IQ-sampled Airspy) too, in a *different* function
+(`ka9q-web.c`'s session-init default-view selection) this session's
+earlier `Frontend.isreal` fix never touched:
+
+- **Centre**: `sp->center_frequency = round(Frontend.samprate/4.0)` is
+  correct for a real front end (baseband spans `[0, Nyquist]`, so its
+  true centre *is* `Fs/4`) but wrong for a complex one, where baseband is
+  centred on 0 Hz = the tuner's own LO (`Frontend.frequency` absolute) -
+  the old formula put the default view a quarter-samprate off VHF's true
+  145 MHz centre.
+- **Width**: the zoom-level search capped the span at `Frontend.samprate
+  / 2.0` (Nyquist) - correct for real sampling, where Nyquist *is* the
+  usable width, but a real bug for complex/IQ sampling, where the full
+  *unambiguous* span is the whole sample rate, not half of it. This
+  silently made `zoom_table`'s own widest-for-this-station entries
+  unreachable: the `1480 Hz` entry (2.4 MHz span, its own comment already
+  says it exists specifically for "this station's full 2.4 Msps
+  complex/IQ capture") exceeds `2.4MHz/2=1.2MHz` and was always skipped
+  - confirmed live, VHF's actual default zoom under the old code landed
+  on the `500 Hz` entry (810 kHz span), nowhere near its real capture
+  width.
+
+Fixed by branching both on `Frontend.isreal`: real front ends keep the
+existing `Fs/4` centre and `Fs/2` width cap unchanged; complex front ends
+now get centre `0` (baseband-relative - the client's existing
+`absoluteCenterHz()` correction already turns this into the true LO
+frequency on screen, matching HF's frequency-offset fix's own reasoning)
+and width cap `Fs` (the full sample rate), so the deliberately-added wide
+`zoom_table` entries for VHF/UHF finally become reachable as the actual
+default.

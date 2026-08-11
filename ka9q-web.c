@@ -1970,14 +1970,33 @@ onion_connection_status home(void *data, onion_request * req,
   int level = 0;
   if (Frontend.samprate > 0) {
     /* Center the default view on the real front end's usable band, and
-       pick the widest zoom level that still fits its Nyquist bandwidth -
+       pick the widest zoom level that still fits its usable bandwidth -
        previously disabled (#if 0) in favor of a fixed level=6 (~3.24 MHz
        span) regardless of the actual front end, which is far too narrow
-       for HF's ~30 MHz of real bandwidth (64.8 Msps direct sampling). */
-    sp->center_frequency = round(Frontend.samprate/4.0);
+       for HF's ~30 MHz of real bandwidth (64.8 Msps direct sampling).
+
+       "Usable bandwidth" and "center" both depend on Frontend.isreal,
+       same real-vs-complex-FFT distinction already fixed once for the
+       spectrum bin-order seam (handle_bin_data(), see PROTOCOL-SPECTRUM.md)
+       - this is the same class of bug in a different function, never
+       touched by that fix. A real->complex FFT (HF's direct-sampling
+       RX888) has baseband spanning [0, Nyquist] - centre Fs/4, usable
+       width Fs/2 (Nyquist), both already correct below. A complex->complex
+       FFT (VHF/UHF's Airspy, IQ-sampled) instead spans the FULL sample
+       rate [-Fs/2, +Fs/2] centred on the tuner's own LO (0 Hz baseband =
+       Frontend.frequency absolute) - using the real-front-end formula
+       there put centre_frequency a quarter-samprate off the true LO
+       centre, and capped the search at Nyquist (Fs/2) instead of the
+       full Fs, making the zoom_table entries specifically added for "this
+       station's full capture bandwidth" (e.g. the 1480Hz/2.4MHz VHF entry
+       above) mathematically unreachable - confirmed live: VHF's own
+       widest achievable entry under the old Nyquist-only cap was 500Hz/
+       810kHz, nowhere near its real 2.4MHz capture width. */
+    double const usable_span = Frontend.isreal ? Frontend.samprate/2.0 : Frontend.samprate;
+    sp->center_frequency = Frontend.isreal ? round(Frontend.samprate/4.0) : 0;
     const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
     for(; level < table_size; level++)
-      if(zoom_table[level].bin_width * zoom_table[level].bin_count <= round(Frontend.samprate/2.0))
+      if(zoom_table[level].bin_width * zoom_table[level].bin_count <= round(usable_span))
         break;
     if (level >= table_size)
       level = table_size - 1; /* nothing fit (shouldn't happen) - narrowest, not out of bounds */
