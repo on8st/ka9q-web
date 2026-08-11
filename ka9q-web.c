@@ -3280,9 +3280,6 @@ void *spectrum_thread(void *arg) {
       pthread_mutex_lock(&session_mutex);
       if (!sp->default_view_retro_checked) {
         sp->default_view_retro_checked = true;
-        fprintf(stderr, "SSRC %u: retroactive default-view check firing (Frontend.frequency=%.3f, "
-                "sp->frequency=%u, sp->center_frequency=%u, last_client_command_ms=%lu)\n",
-                sp->ssrc, Frontend.frequency, sp->frequency, sp->center_frequency, sp->last_client_command_ms);
         /* Never overwrite a frequency/view the user has since chosen for
            themselves - only fix up a session that's still sitting on the
            untouched creation-time defaults. */
@@ -3292,12 +3289,11 @@ void *spectrum_thread(void *arg) {
           int64_t const lo_bound = (int64_t)round(Frontend.frequency + lo_if);
           int64_t const hi_bound = (int64_t)round(Frontend.frequency + hi_if);
           bool retuned = false;
-          fprintf(stderr, "SSRC %u: retroactive check: lo_bound=%lld hi_bound=%lld\n",
-                  sp->ssrc, (long long)lo_bound, (long long)hi_bound);
           if (hi_bound > lo_bound && (sp->frequency < lo_bound || sp->frequency > hi_bound)) {
             sp->frequency = (uint32_t)round((lo_bound + hi_bound) / 2.0);
             retuned = true;
-            fprintf(stderr, "SSRC %u: retroactive check: retuning frequency to %u\n", sp->ssrc, sp->frequency);
+            fprintf(stderr, "SSRC %u: retroactive default-view correction: session was created before "
+                    "Frontend populated, retuning stuck HF-default frequency to %u Hz\n", sp->ssrc, sp->frequency);
           }
           if (sp->center_frequency == 0) {
             sp->center_frequency = (uint32_t)round(Frontend.frequency + (lo_if + hi_if) / 2.0);
@@ -3808,12 +3804,6 @@ static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_
 
   /* Update status values early (keeps some fields fresh) */
   decode_radio_status(&Frontend, &Channel, buffer + 1, rx_length - 1);
-  {
-    static unsigned long dbg_count = 0;
-    if (dbg_count++ % 20 == 0)
-      fprintf(stderr, "DBG spectrum_packet: Frontend.samprate=%.3f Frontend.frequency=%.3f\n",
-              Frontend.samprate, Frontend.frequency);
-  }
   /* Record that we received a spectrum TLV for this session */
   sp->last_spectrum_recv_ms = now_ms();
 
@@ -3943,14 +3933,6 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   /* Detect whether this status packet contains an explicit SHIFT_FREQUENCY TLV */
   bool have_shift = tlv_has_type(buffer + 1, rx_length - 1, SHIFT_FREQUENCY);
   decode_radio_status(&Frontend, &Channel, buffer + 1, rx_length - 1);
-  {
-    static unsigned long dbg_count = 0;
-    if (dbg_count++ % 20 == 0)
-      fprintf(stderr, "DBG status_packet: Frontend.samprate=%.3f Frontend.frequency=%.3f has_samprate_tlv=%d has_lo_tlv=%d\n",
-              Frontend.samprate, Frontend.frequency,
-              (int)tlv_has_type(buffer + 1, rx_length - 1, INPUT_SAMPRATE),
-              (int)tlv_has_type(buffer + 1, rx_length - 1, FIRST_LO_FREQUENCY));
-  }
 
   if (have_shift) {
     double new_shift = Channel.tune.shift;
