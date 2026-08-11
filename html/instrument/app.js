@@ -382,25 +382,39 @@ $("reset-settings").addEventListener("click", () => {
 // ---- Filter edges, CW shift, QuickBW, AZC ----
 // Server echoes (filterEdges/shift events) arrive periodically,
 // independent of what the user is doing - same race this session already
-// found and fixed once for the frequency digits (freq-digits.js's
-// `editing` flag): blindly overwriting these inputs on every echo would
-// yank a value out from under the user mid-type. Guard the same way -
-// only reflect an echo while the input isn't focused.
+// found and fixed once for the frequency digits. A plain focus check
+// isn't quite enough here though: filter edges are TWO separate inputs
+// that both need editing before Send is clicked, so a field can be
+// blurred-but-not-yet-sent (e.g. tabbing from Low to High) when an echo
+// arrives - confirmed live, a fill-low/fill-high/click-Send sequence
+// with no pause still lost the Low value to a mid-sequence echo despite
+// the focus guard. Stock hit this same problem (`edgeManualDirty`,
+// html/radio.js) and solved it the same way: a dirty flag per field,
+// cleared only on Send, not just on blur.
+let filterLowDirty = false;
+let filterHighDirty = false;
+$("filter-low").addEventListener("input", () => { filterLowDirty = true; });
+$("filter-high").addEventListener("input", () => { filterHighDirty = true; });
 $("filter-edges-send").addEventListener("click", () => {
   const low = Number($("filter-low").value);
   const high = Number($("filter-high").value);
   if (Number.isFinite(low) && Number.isFinite(high)) client.setFilterEdges(low, high);
+  filterLowDirty = false;
+  filterHighDirty = false;
 });
 client.addEventListener("filterEdges", (e) => {
-  if (document.activeElement !== $("filter-low")) $("filter-low").value = String(e.detail.lowHz);
-  if (document.activeElement !== $("filter-high")) $("filter-high").value = String(e.detail.highHz);
+  if (!filterLowDirty) $("filter-low").value = String(e.detail.lowHz);
+  if (!filterHighDirty) $("filter-high").value = String(e.detail.highHz);
 });
+let shiftDirty = false;
+$("shift-input").addEventListener("input", () => { shiftDirty = true; });
 $("shift-send").addEventListener("click", () => {
   const v = Number($("shift-input").value);
   if (Number.isFinite(v)) client.setShift(v);
+  shiftDirty = false;
 });
 client.addEventListener("shift", (e) => {
-  if (document.activeElement !== $("shift-input")) $("shift-input").value = String(e.detail.hz);
+  if (!shiftDirty) $("shift-input").value = String(e.detail.hz);
 });
 
 // QuickBW: a filter-edges shortcut, not a distinct wire feature - toggles

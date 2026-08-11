@@ -627,4 +627,13 @@ of everything so far to turn out client-only, and that held:
   the server's last-known value (`-5000`) before the Send button was ever
   clicked - confirmed live via a direct fill-then-wait test, not assumed.
   Fixed with the same guard as `freq-digits.js`: skip the overwrite while
-  `document.activeElement` is the input being typed into.
+  `document.activeElement` is the input being typed into. **That guard
+  alone still wasn't enough** for filter edges specifically, caught by
+  the same kind of direct live test: filter edges are TWO separate
+  inputs (Low, High) that both need editing before Send is clicked, so
+  Low can be blurred-but-not-yet-sent while the user is still typing
+  High - an echo landing in that gap clobbered Low even with the focus
+  guard in place. Stock had already solved this exact problem
+  (`edgeManualDirty`, `radio.js`) with a dirty flag per field, cleared
+  only on Send rather than on blur - ported that instead of the simpler
+  focus-only check for these two fields.
