@@ -27,3 +27,10 @@ export const ALT_STEP_HZ = 10;
 export function roundToNearestKhz(hz) {
   return Math.round(hz / 1000) * 1000;
 }
+
+// Click-to-tune in the spectrum should land on the same grid the step
+// up/down buttons walk, not on the exact (sub-Hz) pixel the user clicked.
+export function snapToStep(hz, stepHz) {
+  if (!stepHz) return Math.round(hz);
+  return Math.round(hz / stepHz) * stepHz;
+}

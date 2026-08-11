@@ -6,7 +6,7 @@
 import { Ka9qWebClient } from "./ws-client.js";
 import { createDigitDisplay } from "./freq-digits.js";
 import { createValuePanel } from "./value-panel.js";
-import { STEP_OPTIONS_HZ, applyStep, fmtStep, ALT_STEP_HZ, roundToNearestKhz } from "./tune-step.js";
+import { STEP_OPTIONS_HZ, applyStep, fmtStep, ALT_STEP_HZ, roundToNearestKhz, snapToStep } from "./tune-step.js";
 import { modeForFrequency } from "./mode-by-frequency.js";
 import { bandsInCoverage, BAND_OPTIONS } from "./band-options.js";
 import { loadMemories, addMemory, deleteMemory, replaceMemories, exportMemoriesJson, importMemoriesJson } from "./memories.js";
@@ -38,8 +38,16 @@ const client = new Ka9qWebClient(
 // misnomer, see mode-by-frequency.js) - applied to programmatic tuning
 // (click-to-tune, band select, memory recall), not user-typed entry or
 // manual step nudges, matching stock's own "don't override the user"
-// guard as closely as this UI's simpler tune() call sites allow.
-let modeByFreqEnabled = false;
+// guard as closely as this UI's simpler tune() call sites allow. Stock
+// persists this ("switchModesByFrequency" in localStorage) - matched here
+// too (reported not surviving reload, live, 2026-08-11 - this toggle had
+// simply never been wired to storage at all).
+const MODE_BY_FREQ_KEY = "instrument_mode_by_freq";
+let modeByFreqEnabled = localStorage.getItem(MODE_BY_FREQ_KEY) === "1";
+function setModeByFreqEnabled(v) {
+  modeByFreqEnabled = !!v;
+  localStorage.setItem(MODE_BY_FREQ_KEY, modeByFreqEnabled ? "1" : "0");
+}
 function maybeAutoSwitchMode(hz) {
   if (!modeByFreqEnabled) return;
   const mode = modeForFrequency(hz);
@@ -58,10 +66,22 @@ let altStepEnabled = false;
 
 // ---- Spectrum/waterfall: fills #display-area, per "the receiver fills
 // the screen" (brief section 4). ----
-let azcEnabled = false; // "Keep frequency centred" - declared before
-// createSpectrumDisplay since its onTune callback closes over it.
+// "Keep frequency centred" - declared before createSpectrumDisplay since
+// its onTune callback closes over it. No stock equivalent to match, but
+// persisted for the same reason as modeByFreqEnabled above (reported not
+// surviving reload, live, 2026-08-11).
+const AZC_ENABLED_KEY = "instrument_azc_enabled";
+let azcEnabled = localStorage.getItem(AZC_ENABLED_KEY) === "1";
+function setAzcEnabled(v) {
+  azcEnabled = !!v;
+  localStorage.setItem(AZC_ENABLED_KEY, azcEnabled ? "1" : "0");
+}
 const spectrumDisplay = createSpectrumDisplay($("display-area"), {
-  onTune: (hz) => {
+  onTune: (rawHz) => {
+    // Click-to-tune lands on the same grid the step buttons walk, not the
+    // exact (sub-Hz) pixel clicked - matches the step shown in FREQUENCY's
+    // own controls, including the "Alt" fixed-10Hz override.
+    const hz = snapToStep(rawHz, altStepEnabled ? ALT_STEP_HZ : stepHz);
     client.tune(hz);
     if (azcEnabled) client.zoomCenter(hz);
     maybeAutoSwitchMode(hz);
@@ -432,9 +452,13 @@ $("spectrum-avg-send").addEventListener("click", () => {
 });
 $("max-hold-enable").checked = spectrumDisplay.isMaxHoldEnabled();
 $("max-hold-enable").addEventListener("change", (e) => spectrumDisplay.setMaxHoldEnabled(e.target.checked));
+$("show-live").checked = spectrumDisplay.isShowLive();
 $("show-live").addEventListener("change", (e) => spectrumDisplay.setShowLive(e.target.checked));
+$("show-max").checked = spectrumDisplay.isShowMaxTrace();
 $("show-max").addEventListener("change", (e) => spectrumDisplay.setShowMaxTrace(e.target.checked));
+$("show-min").checked = spectrumDisplay.isShowMinTrace();
 $("show-min").addEventListener("change", (e) => spectrumDisplay.setShowMinTrace(e.target.checked));
+$("freeze-min-max").checked = spectrumDisplay.isFreezeMinMax();
 $("freeze-min-max").addEventListener("change", (e) => spectrumDisplay.setFreezeMinMax(e.target.checked));
 $("hold-decay").value = String(spectrumDisplay.getHoldDecay());
 $("hold-decay").addEventListener("change", (e) => spectrumDisplay.setHoldDecay(e.target.value));
@@ -453,7 +477,9 @@ $("spectrum-poll-send").addEventListener("click", () => {
 });
 
 // ---- Cursor, spectrum fill style, hide DC spike ----
+$("cursor-active").checked = spectrumDisplay.isCursorActive();
 $("cursor-active").addEventListener("change", (e) => spectrumDisplay.setCursorActive(e.target.checked));
+$("no-spectrum-fill").checked = spectrumDisplay.isNoFill();
 $("no-spectrum-fill").addEventListener("change", (e) => spectrumDisplay.setNoFill(e.target.checked));
 $("hide-dc-spike").checked = spectrumDisplay.isHideDcSpike();
 $("hide-dc-spike").addEventListener("change", (e) => spectrumDisplay.setHideDcSpike(e.target.checked));
@@ -541,8 +567,10 @@ $("quickbw-save").addEventListener("click", () => {
   if (quickBwActive) client.setFilterEdges(-lowerOffset, upperOffset);
 });
 
-$("azc-enable").addEventListener("change", (e) => { azcEnabled = e.target.checked; });
-$("mode-by-freq").addEventListener("change", (e) => { modeByFreqEnabled = e.target.checked; });
+$("azc-enable").checked = azcEnabled;
+$("mode-by-freq").checked = modeByFreqEnabled;
+$("azc-enable").addEventListener("change", (e) => { setAzcEnabled(e.target.checked); });
+$("mode-by-freq").addEventListener("change", (e) => { setModeByFreqEnabled(e.target.checked); });
 $("show-band-edges").checked = spectrumDisplay.isShowBandEdges();
 $("show-band-edges").addEventListener("change", (e) => spectrumDisplay.setShowBandEdges(e.target.checked));
 
@@ -614,8 +642,8 @@ function buildSpectrumCtxMenu(panel, close) {
       ${ctxRange("Height", "height", 10, 90, 1, spectrumDisplay.getSpectrumPercent())}
       <div class="grp">Traces</div>
       ${ctxChk("Live", spectrumDisplay.isShowLive(), "live")}
-      ${ctxChk("Max", false, "show-max")}
-      ${ctxChk("Min", false, "show-min")}
+      ${ctxChk("Max", spectrumDisplay.isShowMaxTrace(), "show-max")}
+      ${ctxChk("Min", spectrumDisplay.isShowMinTrace(), "show-min")}
       ${ctxChk("Freeze", spectrumDisplay.isFreezeMinMax(), "freeze")}
       ${ctxChk("Max hold", spectrumDisplay.isMaxHoldEnabled(), "max-hold")}
       ${ctxSel("Decay", "decay", ["1", "1.0001", "1.0005", "1.001", "1.005", "1.01", "1.05", "1.1"], String(spectrumDisplay.getHoldDecay()))}
@@ -691,7 +719,7 @@ function buildWaterfallCtxMenu(panel, close) {
         case "wf-floor": { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(Number(val), r.maxDb); break; }
         case "bias": spectrumDisplay.setWaterfallBias(val); break;
         case "colormap": spectrumDisplay.setColorIndex(COLORMAP_NAMES.indexOf(val)); break;
-        case "azc": azcEnabled = checked; $("azc-enable").checked = checked; break;
+        case "azc": setAzcEnabled(checked); $("azc-enable").checked = checked; break;
       }
     });
   });

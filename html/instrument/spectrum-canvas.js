@@ -185,6 +185,41 @@ export function loadColorIndex(storage = localStorage) {
   return Number.isInteger(raw) && raw >= 0 && raw < COLORMAP_NAMES.length ? raw : COLORMAP_DEFAULT_INDEX;
 }
 
+// Small persisted-setting helpers for the many display toggles below (FFT
+// averaging, max/min hold, live/max/min trace visibility, fill style, DC
+// spike hiding, band edges, cursor) - none of these survived a page reload
+// before (reported live 2026-08-11): each setter only touched its
+// in-memory variable, so every reload silently reverted to the hardcoded
+// defaults regardless of what the operator had set via the context menu.
+function loadBool(key, def, storage = localStorage) {
+  const stored = storage.getItem(key);
+  return stored === null ? def : stored === "1";
+}
+function saveBool(key, v, storage = localStorage) {
+  storage.setItem(key, v ? "1" : "0");
+}
+function loadNumber(key, def, storage = localStorage) {
+  const stored = storage.getItem(key);
+  if (stored === null) return def;
+  const raw = Number(stored);
+  return Number.isFinite(raw) ? raw : def;
+}
+function saveNumber(key, v, storage = localStorage) {
+  storage.setItem(key, String(v));
+}
+
+const FFT_AVERAGING_KEY = "instrument_fft_averaging";
+const MAX_HOLD_ENABLED_KEY = "instrument_max_hold_enabled";
+const HOLD_DECAY_KEY = "instrument_hold_decay";
+const FREEZE_MIN_MAX_KEY = "instrument_freeze_min_max";
+const SHOW_LIVE_KEY = "instrument_show_live";
+const SHOW_MAX_TRACE_KEY = "instrument_show_max_trace";
+const SHOW_MIN_TRACE_KEY = "instrument_show_min_trace";
+const NO_FILL_KEY = "instrument_no_fill";
+const HIDE_DC_SPIKE_KEY = "instrument_hide_dc_spike";
+const SHOW_BAND_EDGES_KEY = "instrument_show_band_edges";
+const CURSOR_ACTIVE_KEY = "instrument_cursor_active";
+
 // "Spectrum autoscale" (stock: autoscale button, Spectrum.prototype.
 // measureMinMax()) - a one-shot fit-to-current-data snapshot, not a
 // continuous mode (unlike this UI's own always-on smoothed autorange
@@ -284,58 +319,62 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   // waterfall are drawn (both consume the averaged bins, matching stock -
   // see alphaForAveraging()'s header comment for the real-wire-command
   // sibling this is NOT).
-  let fftAveraging = 1; // 1 = no smoothing, matches the stock input's min
+  let fftAveraging = loadNumber(FFT_AVERAGING_KEY, 1); // 1 = no smoothing, matches the stock input's min
   let binsAverage = null; // Float32Array, lazily (re)sized to match binCount
 
   function setFftAveraging(n) {
     fftAveraging = Math.max(1, Number(n) || 1);
+    saveNumber(FFT_AVERAGING_KEY, fftAveraging);
   }
 
   // "Max/min hold" state - ported from Spectrum.prototype's maxHold/
   // decay/freezeMinMax/binsMax/binsMin (see updateHoldValue() above).
-  let maxHoldEnabled = true; // stock default (radio.js's setDefaultSettings())
-  let holdDecay = 1; // "Infinite" - stock default
-  let freezeMinMax = false;
-  let showLive = true;
-  let showMaxTrace = false;
-  let showMinTrace = false;
+  let maxHoldEnabled = loadBool(MAX_HOLD_ENABLED_KEY, true); // stock default (radio.js's setDefaultSettings())
+  let holdDecay = loadNumber(HOLD_DECAY_KEY, 1); // "Infinite" - stock default
+  let freezeMinMax = loadBool(FREEZE_MIN_MAX_KEY, false);
+  let showLive = loadBool(SHOW_LIVE_KEY, true);
+  let showMaxTrace = loadBool(SHOW_MAX_TRACE_KEY, false);
+  let showMinTrace = loadBool(SHOW_MIN_TRACE_KEY, false);
   let binsMax = null;
   let binsMin = null;
 
   function setMaxHoldEnabled(v) {
     maxHoldEnabled = !!v;
+    saveBool(MAX_HOLD_ENABLED_KEY, maxHoldEnabled);
     binsMax = null; // reseed fresh next frame, matches stock's setMaxHold()
     binsMin = null;
   }
-  function setHoldDecay(v) { holdDecay = Number(v) || 1; }
-  function setFreezeMinMax(v) { freezeMinMax = !!v; }
-  function setShowLive(v) { showLive = !!v; if (!paused) draw(); }
-  function setShowMaxTrace(v) { showMaxTrace = !!v; if (!paused) draw(); }
-  function setShowMinTrace(v) { showMinTrace = !!v; if (!paused) draw(); }
+  function setHoldDecay(v) { holdDecay = Number(v) || 1; saveNumber(HOLD_DECAY_KEY, holdDecay); }
+  function setFreezeMinMax(v) { freezeMinMax = !!v; saveBool(FREEZE_MIN_MAX_KEY, freezeMinMax); }
+  function setShowLive(v) { showLive = !!v; saveBool(SHOW_LIVE_KEY, showLive); if (!paused) draw(); }
+  function setShowMaxTrace(v) { showMaxTrace = !!v; saveBool(SHOW_MAX_TRACE_KEY, showMaxTrace); if (!paused) draw(); }
+  function setShowMinTrace(v) { showMinTrace = !!v; saveBool(SHOW_MIN_TRACE_KEY, showMinTrace); if (!paused) draw(); }
 
   // "Spectrum fill style" (ckNoSpectrumFill) - gates only the live
   // trace's under-curve fill, not its stroke, matching stock exactly
   // (max/min hold traces are never filled in stock either way).
-  let noFill = false;
-  function setNoFill(v) { noFill = !!v; if (!paused) draw(); }
+  let noFill = loadBool(NO_FILL_KEY, false);
+  function setNoFill(v) { noFill = !!v; saveBool(NO_FILL_KEY, noFill); if (!paused) draw(); }
 
   // "Hide DC/centre-bin spike" - needs the front end's real tuned centre
   // (FIRST_LO_FREQUENCY, same field the frequency-offset fix already
   // needed - see PROTOCOL-SPECTRUM.md) to know which bin is DC.
-  let hideDcSpike = true; // stock default
+  let hideDcSpike = loadBool(HIDE_DC_SPIKE_KEY, true); // stock default
   let frontendFrequencyHz = null;
-  function setHideDcSpike(v) { hideDcSpike = !!v; }
+  function setHideDcSpike(v) { hideDcSpike = !!v; saveBool(HIDE_DC_SPIKE_KEY, hideDcSpike); }
   function setFrontendFrequencyHz(hz) { frontendFrequencyHz = hz; }
 
   // "Show ham band edge markers" - see band-edges.js for the table.
-  let showBandEdges = false;
-  function setShowBandEdges(v) { showBandEdges = !!v; if (!paused) draw(); }
+  let showBandEdges = loadBool(SHOW_BAND_EDGES_KEY, false);
+  function setShowBandEdges(v) { showBandEdges = !!v; saveBool(SHOW_BAND_EDGES_KEY, showBandEdges); if (!paused) draw(); }
 
   // "Cursor" - a display-only frequency marker (distinct from tuning),
   // ported from spectrum.js's cursor_active/cursor_freq/drawCursor().
-  let cursorActive = false;
+  // cursorFreqHz itself is deliberately NOT persisted - it's a transient
+  // reference point tied to the current session's clicks, not a setting.
+  let cursorActive = loadBool(CURSOR_ACTIVE_KEY, false);
   let cursorFreqHz = null;
-  function setCursorActive(v) { cursorActive = !!v; if (!paused) draw(); }
+  function setCursorActive(v) { cursorActive = !!v; saveBool(CURSOR_ACTIVE_KEY, cursorActive); if (!paused) draw(); }
   function setCursorFreqHz(hz) { cursorFreqHz = hz; if (!paused) draw(); }
   // Click-to-tune (prerequisite for "Keep frequency centred"/AZC, which
   // just conditionally follows this with a zoomCenter - ported from
@@ -549,17 +588,16 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
       }
     }
 
-    // Tuned-frequency band. The thin marker line spans the full height
-    // (matches the mockup) as a persistent trail through the waterfall's
-    // scrolled history, showing tuning position over time. The translucent
-    // passband-width fill, however, must stay confined to the trace region
-    // (0..splitY): that region is fully repainted every frame, but the
-    // waterfall below only ever scrolls its existing pixels - anything
-    // drawn into it here gets redrawn onto the SAME still-visible rows on
-    // every subsequent frame, compounding the fill's alpha frame after
-    // frame until it turns into a solid, wide, opaque bar, and freezing
-    // into a permanent streak once those rows scroll out of view. That's
-    // what produced the too-wide, greyed-out remnants seen live (2026-08-11).
+    // Tuned-frequency band: confined entirely to the trace region
+    // (0..splitY), never the waterfall below. That region is fully
+    // repainted every frame, but the waterfall only ever scrolls its
+    // existing pixels - anything drawn into it here (even just the thin
+    // line) gets redrawn onto the SAME still-visible rows on every
+    // subsequent frame and freezes into a permanent streak once those rows
+    // scroll out of view. An earlier version let the line span full height
+    // as an intentional "trail"; live use showed that read as a stray,
+    // out-of-place mark cutting through the waterfall rather than a
+    // deliberate feature, so it's confined like the fill (2026-08-11).
     if (tunedFreqHz !== null) {
       const x = pixelForHz(tunedFreqHz, w, centerHz, binWidthHz, binCount);
       if (x !== null) {
@@ -568,7 +606,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
         ctx.strokeStyle = "#56C7FF";
         ctx.beginPath();
         ctx.moveTo(x, 0);
-        ctx.lineTo(x, h);
+        ctx.lineTo(x, splitY);
         ctx.stroke();
       }
     }
@@ -663,7 +701,9 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     setShowLive,
     isShowLive: () => showLive,
     setShowMaxTrace,
+    isShowMaxTrace: () => showMaxTrace,
     setShowMinTrace,
+    isShowMinTrace: () => showMinTrace,
     setNoFill,
     isNoFill: () => noFill,
     setHideDcSpike,
