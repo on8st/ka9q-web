@@ -799,3 +799,20 @@ would actually diverge before being treated as a general protocol fact
 - and any fix building on such a finding needs the *other* client (here,
 stock) checked too when the server behavior it depends on changes, even
 if that other client is nominally "someone else's problem."
+
+## Right-click context menu (2026-08-11)
+
+Explicitly deferred earlier this build ("wait until more is built") when
+most of what the mockup's two context menus (Spectrum above the trace/
+waterfall split, Waterfall below it) would host didn't exist yet. Built
+now that it does - every item in both menus is wired to a function this
+session already built and verified independently via the drawer cards;
+this menu is a second, faster way to reach the same state, not new
+underlying functionality. New `context-menu.js`: a coordinate-positioned
+variant of `value-panel.js`'s popover (same "glass" visual language, no
+caret since there's no single anchor element). Simplified from the
+mockup in two small ways: the window-type selector offers 6 of the
+drawer's 9 options (matching the mockup's own scope exactly) rather than
+duplicating the fuller set, and the colormap picker is a plain `<select>`
+(consistent with the rest of this app's controls) rather than the
+mockup's gradient-swatch grid - a visual nicety, not a functional gap.

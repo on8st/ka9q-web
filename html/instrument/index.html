@@ -85,6 +85,15 @@ body{background:var(--ink);color:var(--text);font-family:var(--ui);font-size:13p
 }
 .value-panel.below::before{top:-5px;border-left:1px solid rgba(120,135,154,.22);border-top:1px solid rgba(120,135,154,.22)}
 .value-panel.above::before{bottom:-5px;border-right:1px solid rgba(120,135,154,.22);border-bottom:1px solid rgba(120,135,154,.22)}
+.ctx-menu::before{display:none}
+.ctx-menu{max-height:min(560px,80vh);overflow-y:auto;min-width:236px}
+.ctx-menu .pop-body{gap:7px}
+.ctx-menu .grp{font-size:9px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-top:3px}
+.ctx-menu .ctx-row{display:flex;align-items:center;gap:8px;font-size:12px}
+.ctx-menu .ctx-row .lab{flex:1}
+.ctx-menu .ctx-row input.k.num{width:60px}
+.ctx-menu .ctx-row input[type=range]{width:90px}
+.ctx-menu button.k{width:100%;text-align:left}
 .pop-head{padding:8px 13px 7px;border-bottom:1px solid rgba(120,135,154,.16);font-size:9px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--live);display:flex;justify-content:space-between;gap:12px}
 .pop-head span:last-child{color:var(--dim);font-weight:600}
 .pop-body{padding:11px 13px 12px;display:flex;flex-direction:column;gap:9px}

@@ -15,6 +15,7 @@ import { createSpectrumDisplay, COLORMAP_NAMES } from "./spectrum-canvas.js";
 import { loadNotes, saveNotes } from "./notes.js";
 import { spectrumToCsv } from "./spectrum-export.js";
 import { createAudioPlayer } from "./audio.js";
+import { showContextMenu } from "./context-menu.js";
 
 const $ = (id) => document.getElementById(id);
 let currentFreqHz = null;
@@ -558,7 +559,7 @@ function renderTelemetry() {
 }
 
 $("pause-toggle").addEventListener("change", (e) => spectrumDisplay.setPaused(e.target.checked));
-$("export-csv").addEventListener("click", () => {
+function exportSpectrumCsv() {
   const current = spectrumDisplay.getLastSpectrum();
   if (!current) return;
   const blob = new Blob([spectrumToCsv(current, current.centerHz)], { type: "text/csv" });
@@ -567,6 +568,148 @@ $("export-csv").addEventListener("click", () => {
   a.download = "spectrum.csv";
   a.click();
   URL.revokeObjectURL(a.href);
-});
+}
+$("export-csv").addEventListener("click", exportSpectrumCsv);
 $("notes-text").value = loadNotes();
 $("notes-text").addEventListener("input", (e) => saveNotes(e.target.value));
+
+// ---- Right-click context menu on the spectrum/waterfall canvas - the
+// mockup's own two-menu pattern (above the split = Spectrum, below =
+// Waterfall), deferred until now since almost every control it hosts
+// didn't exist yet when first asked about (see INSTRUMENT-DECISIONS.md).
+// Every item here is wired to a function this session already built and
+// verified elsewhere (the drawer cards) - this menu is a second, faster
+// way to reach the same state, not new functionality of its own. Reads
+// current values fresh on each open (`buildContent` re-runs every time),
+// so it never goes stale relative to changes made via the drawer.
+function ctxRow(labelHtml, controlHtml) {
+  return `<div class="ctx-row">${labelHtml}${controlHtml}</div>`;
+}
+function ctxChk(label, checked, action) {
+  return `<label class="chk ctx-row" data-action="${action}"><input type="checkbox" ${checked ? "checked" : ""}><span class="lab">${label}</span></label>`;
+}
+function ctxAct(label, action) {
+  return `<button class="k mini" data-action="${action}" style="width:100%;text-align:left">${label}</button>`;
+}
+function ctxNum(label, action, value, step = "1") {
+  return ctxRow(`<span class="lab">${label}</span>`, `<input class="k num" type="number" step="${step}" value="${value ?? ""}" data-action="${action}">`);
+}
+function ctxSel(label, action, options, value) {
+  return ctxRow(`<span class="lab">${label}</span>`, `<select class="k" data-action="${action}">${options.map((o) => `<option${o === value ? " selected" : ""}>${o}</option>`).join("")}</select>`);
+}
+function ctxRange(label, action, min, max, step, value) {
+  return ctxRow(`<span class="lab">${label}</span>`, `<input type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-action="${action}">`);
+}
+
+function buildSpectrumCtxMenu(panel, close) {
+  const range = spectrumDisplay.getRange();
+  panel.innerHTML = `
+    <div class="pop-head"><span>Spectrum</span><span></span></div>
+    <div class="pop-body">
+      ${ctxAct("Autoscale", "autoscale")}
+      ${ctxChk("Pause", spectrumDisplay.isPaused(), "pause")}
+      <div class="sep" style="height:1px;background:rgba(120,135,154,.18)"></div>
+      ${ctxNum("Ceiling (dBm)", "ceiling", range.maxDb.toFixed(0))}
+      ${ctxNum("Floor (dBm)", "floor", range.minDb.toFixed(0))}
+      ${ctxRange("Height", "height", 10, 90, 1, spectrumDisplay.getSpectrumPercent())}
+      <div class="grp">Traces</div>
+      ${ctxChk("Live", spectrumDisplay.isShowLive(), "live")}
+      ${ctxChk("Max", false, "show-max")}
+      ${ctxChk("Min", false, "show-min")}
+      ${ctxChk("Freeze", spectrumDisplay.isFreezeMinMax(), "freeze")}
+      ${ctxChk("Max hold", spectrumDisplay.isMaxHoldEnabled(), "max-hold")}
+      ${ctxSel("Decay", "decay", ["1", "1.0001", "1.0005", "1.001", "1.005", "1.01", "1.05", "1.1"], String(spectrumDisplay.getHoldDecay()))}
+      <div class="grp">Averaging</div>
+      ${ctxNum("FFT (client)", "fft-avg", spectrumDisplay.getFftAveraging())}
+      ${ctxRow('<span class="lab">Spectrum</span>', '<input class="k num" type="number" step="1" value="10" data-action="spectrum-avg">')}
+      ${ctxSel("Window", "window", ["KAISER", "RECT", "BLACKMAN", "GAUSSIAN", "HANN", "HAMMING"], "KAISER")}
+      ${ctxRow('<span class="lab">Overlap (%)</span>', '<input class="k num" type="number" step="1" value="50" data-action="overlap">')}
+      <div class="sep" style="height:1px;background:rgba(120,135,154,.18)"></div>
+      ${ctxChk("Show band edges", spectrumDisplay.isShowBandEdges(), "band-edges")}
+      ${ctxChk("No fill", spectrumDisplay.isNoFill(), "no-fill")}
+      ${ctxChk("Cursor", spectrumDisplay.isCursorActive(), "cursor")}
+      ${ctxAct("Export spectrum (CSV)", "export-csv")}
+    </div>`;
+
+  panel.querySelectorAll("[data-action]").forEach((el) => {
+    const action = el.dataset.action;
+    const eventName = el.tagName === "INPUT" && el.type === "checkbox" ? "change"
+      : el.tagName === "INPUT" || el.tagName === "SELECT" ? "change" : "click";
+    el.addEventListener(eventName, (e) => {
+      const checked = e.target.type === "checkbox" ? e.target.checked : null;
+      const val = e.target.value;
+      switch (action) {
+        case "autoscale": spectrumDisplay.forceAutoscale(); close(); break;
+        case "pause": spectrumDisplay.setPaused(checked); break;
+        case "live": spectrumDisplay.setShowLive(checked); break;
+        case "ceiling": { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(r.minDb, Number(val)); break; }
+        case "floor": { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(Number(val), r.maxDb); break; }
+        case "height": spectrumDisplay.setSpectrumPercent(Number(val)); break;
+        case "show-max": spectrumDisplay.setShowMaxTrace(checked); break;
+        case "show-min": spectrumDisplay.setShowMinTrace(checked); break;
+        case "freeze": spectrumDisplay.setFreezeMinMax(checked); break;
+        case "max-hold": spectrumDisplay.setMaxHoldEnabled(checked); break;
+        case "decay": spectrumDisplay.setHoldDecay(val); break;
+        case "fft-avg": spectrumDisplay.setFftAveraging(val); break;
+        case "spectrum-avg": { const n = Number(val); if (Number.isFinite(n) && n > 0) client.setSpectrumAverage(n); break; }
+        case "window": client.setWindow(`${val}_WINDOW`, 0); break;
+        case "overlap": { const n = Number(val) / 100; if (Number.isFinite(n) && n >= 0 && n < 1) client.setSpectrumOverlap(n); break; }
+        case "band-edges": spectrumDisplay.setShowBandEdges(checked); break;
+        case "no-fill": spectrumDisplay.setNoFill(checked); break;
+        case "cursor": spectrumDisplay.setCursorActive(checked); break;
+        case "export-csv": exportSpectrumCsv(); close(); break;
+      }
+    });
+  });
+}
+
+function buildWaterfallCtxMenu(panel, close) {
+  const range = spectrumDisplay.getRange();
+  panel.innerHTML = `
+    <div class="pop-head"><span>Waterfall</span><span></span></div>
+    <div class="pop-body">
+      ${ctxNum("Ceiling (dBm)", "wf-ceiling", range.maxDb.toFixed(0))}
+      ${ctxNum("Floor (dBm)", "wf-floor", range.minDb.toFixed(0))}
+      ${ctxNum("Bias", "bias", spectrumDisplay.getWaterfallBias())}
+      <div class="grp">Colormap</div>
+      ${ctxSel("Palette", "colormap", COLORMAP_NAMES, COLORMAP_NAMES[spectrumDisplay.getColorIndex()])}
+      <div class="sep" style="height:1px;background:rgba(120,135,154,.18)"></div>
+      ${ctxAct("Zoom in", "zoom-in")}
+      ${ctxAct("Zoom out", "zoom-out")}
+      ${ctxAct("Centre on tuned frequency", "zoom-center")}
+      ${ctxChk("Auto zoom centre (AZC)", azcEnabled, "azc")}
+    </div>`;
+
+  panel.querySelectorAll("[data-action]").forEach((el) => {
+    const action = el.dataset.action;
+    const eventName = el.type === "checkbox" ? "change" : "change";
+    el.addEventListener(eventName, (e) => {
+      const checked = e.target.type === "checkbox" ? e.target.checked : null;
+      const val = e.target.value;
+      switch (action) {
+        case "wf-ceiling": { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(r.minDb, Number(val)); break; }
+        case "wf-floor": { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(Number(val), r.maxDb); break; }
+        case "bias": spectrumDisplay.setWaterfallBias(val); break;
+        case "colormap": spectrumDisplay.setColorIndex(COLORMAP_NAMES.indexOf(val)); break;
+        case "azc": azcEnabled = checked; $("azc-enable").checked = checked; break;
+      }
+    });
+  });
+  panel.querySelectorAll('[data-action="zoom-in"],[data-action="zoom-out"],[data-action="zoom-center"]').forEach((el) => {
+    el.addEventListener("click", () => {
+      if (currentFreqHz === null) return;
+      if (el.dataset.action === "zoom-in") client.zoomStep(1, currentFreqHz);
+      else if (el.dataset.action === "zoom-out") client.zoomStep(-1, currentFreqHz);
+      else client.zoomCenter(currentFreqHz);
+      close();
+    });
+  });
+}
+
+spectrumDisplay.canvas.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  const rect = spectrumDisplay.canvas.getBoundingClientRect();
+  const relY = (e.clientY - rect.top) / rect.height;
+  if (relY < 0.46) showContextMenu(e.clientX, e.clientY, buildSpectrumCtxMenu);
+  else showContextMenu(e.clientX, e.clientY, buildWaterfallCtxMenu);
+});

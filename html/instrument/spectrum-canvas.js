@@ -651,6 +651,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     setFreezeMinMax,
     isFreezeMinMax: () => freezeMinMax,
     setShowLive,
+    isShowLive: () => showLive,
     setShowMaxTrace,
     setShowMinTrace,
     setNoFill,
