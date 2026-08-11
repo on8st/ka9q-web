@@ -26,6 +26,8 @@ export const FIELD_FE_ISREAL = 102;
 export const FIELD_OUTPUT_SAMPRATE = 20;
 export const FIELD_OUTPUT_CHANNELS = 49;
 export const FIELD_OUTPUT_ENCODING = 107;
+export const FIELD_LOW_EDGE = 39; // demod filter low edge (Hz offset from carrier) - distinct from FIELD_FE_LOW_EDGE (100), the front end's IF window
+export const FIELD_HIGH_EDGE = 40;
 
 /**
  * Returns a Map of field_id -> Uint8Array for every TLV field in this

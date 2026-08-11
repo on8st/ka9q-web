@@ -11,8 +11,10 @@ import {
   FIELD_FE_ISREAL,
   FIELD_FE_LOW_EDGE,
   FIELD_FIRST_LO_FREQUENCY,
+  FIELD_HIGH_EDGE,
   FIELD_IF_POWER,
   FIELD_INPUT_SAMPRATE,
+  FIELD_LOW_EDGE,
   FIELD_OUTPUT_CHANNELS,
   FIELD_OUTPUT_ENCODING,
   FIELD_OUTPUT_SAMPRATE,
@@ -46,6 +48,8 @@ export class Ka9qWebClient extends EventTarget {
     this.ssrc = null; // from the server's own "S:<ssrc>" text message - required for every A:/O: audio command
     this.audioOutput = null; // { samprate, channels, encoding }, from OUTPUT_SAMPRATE/OUTPUT_CHANNELS/OUTPUT_ENCODING TLV fields - authoritative for PCM playback config, see audio.js
     this.zoomTableSize = null; // from "ZSIZE:<n>", the reply to a raw "Z:SIZE" query - number of valid zoom-table indices for this front end (radio.js's fetchZoomTableSize())
+    this.filterEdges = null; // { lowHz, highHz }, from Channel Data FIELD_LOW_EDGE/FIELD_HIGH_EDGE (39/40) - confirms a sent e:<low>:<high> took effect
+    this.shiftHz = null; // from the inbound "SHIFT:<hz>" text message (PROTOCOL-TEXT.md) - the post-detection audio offset, sent unconditionally on connect/change
     this._fields = new Map();
     this._ws = null;
   }
@@ -144,6 +148,23 @@ export class Ka9qWebClient extends EventTarget {
     this._sendCommand(`r:${Math.round(ms)}`);
   }
 
+  /** Demod filter passband edges (Hz offsets from the tuned carrier, not
+   * absolute Hz - e.g. USB is roughly 50..3000). Always sent as a pair,
+   * ported from radio.js's sendFilterEdges() -> 'e:<low>:<high>'. Also
+   * the underlying command QuickBW uses to swap in/out its alternate
+   * bandwidth preset - there is no separate QuickBW wire command. */
+  setFilterEdges(lowHz, highHz) {
+    this._sendCommand(`e:${Math.round(lowHz)}:${Math.round(highHz)}`);
+  }
+
+  /** Post-detection audio shift (BFO-style Hz offset - the CW sidetone
+   * pitch in CWU/CWL, meaningful in any mode). Ported from radio.js's
+   * sendShift() -> 't:<hz>'. Confirmed by name against the inbound
+   * "SHIFT:<hz>" echo (PROTOCOL-TEXT.md) this sets. */
+  setShift(hz) {
+    this._sendCommand(`t:${Math.round(hz)}`);
+  }
+
   /** S:/S:STOP are sent raw, NOT wrapped in the C:<clientId>:<seq>:
    * envelope every other outbound command uses - confirmed against
    * radio.js's own on_ws_open(), which calls ws.send("S:...") directly. */
@@ -230,6 +251,16 @@ export class Ka9qWebClient extends EventTarget {
         encoding: this._fields.has(FIELD_OUTPUT_ENCODING) ? asUint(this._fields.get(FIELD_OUTPUT_ENCODING)) : null,
       };
     }
+    // Demod filter edges (39/40) - confirms a sent setFilterEdges() took
+    // effect; distinct from FIELD_FE_LOW_EDGE/HIGH_EDGE (100/101, the
+    // front end's own IF window, already in `frontend` above).
+    if (this._fields.has(FIELD_LOW_EDGE) && this._fields.has(FIELD_HIGH_EDGE)) {
+      this.filterEdges = {
+        lowHz: asFloat32(this._fields.get(FIELD_LOW_EDGE)),
+        highHz: asFloat32(this._fields.get(FIELD_HIGH_EDGE)),
+      };
+      this.dispatchEvent(new CustomEvent("filterEdges", { detail: this.filterEdges }));
+    }
   }
 
   _onTextMessage(text) {
@@ -242,6 +273,14 @@ export class Ka9qWebClient extends EventTarget {
         this.dispatchEvent(new CustomEvent("tunedFreq", {
           detail: { hz, forced: args[0] === "BFREQ_FORCE" },
         }));
+      }
+      return;
+    }
+    if (args[0] === "SHIFT") {
+      const hz = parseFloat(args[1]);
+      if (Number.isFinite(hz)) {
+        this.shiftHz = hz;
+        this.dispatchEvent(new CustomEvent("shift", { detail: { hz } }));
       }
       return;
     }

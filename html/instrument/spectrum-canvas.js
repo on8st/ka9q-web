@@ -210,7 +210,7 @@ export function measureAutoscaleRange(binsDb) {
 const AUTORANGE_SMOOTHING = 0.15;
 const AUTORANGE_PADDING_DB = 4;
 
-export function createSpectrumDisplay(container) {
+export function createSpectrumDisplay(container, { onTune } = {}) {
   container.innerHTML = "";
   container.classList.add("spectrum-display");
   const canvas = document.createElement("canvas");
@@ -331,13 +331,20 @@ export function createSpectrumDisplay(container) {
   let cursorFreqHz = null;
   function setCursorActive(v) { cursorActive = !!v; if (!paused) draw(); }
   function setCursorFreqHz(hz) { cursorFreqHz = hz; if (!paused) draw(); }
+  // Click-to-tune (prerequisite for "Keep frequency centred"/AZC, which
+  // just conditionally follows this with a zoomCenter - ported from
+  // spectrum.js's mouseup handler, minus its drag-distance/duration
+  // thresholds since this UI has no drag-to-pan yet to distinguish from).
+  // Cursor-active takes priority, matching stock: a click sets the cursor
+  // marker instead of tuning when the cursor is turned on.
   canvas.addEventListener("click", (e) => {
-    if (!cursorActive || !lastSpectrum) return;
+    if (!lastSpectrum) return;
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     const x = (e.clientX - rect.left) * dpr;
     const hz = hzForPixel(x, canvas.width, lastSpectrum.centerHz, lastSpectrum.binWidthHz, lastSpectrum.binCount);
-    setCursorFreqHz(hz);
+    if (cursorActive) setCursorFreqHz(hz);
+    else if (onTune) onTune(hz);
   });
 
   /** Applies DC-spike interpolation (cosmetic only) then FFT averaging,

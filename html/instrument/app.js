@@ -35,7 +35,14 @@ const client = new Ka9qWebClient(
 
 // ---- Spectrum/waterfall: fills #display-area, per "the receiver fills
 // the screen" (brief section 4). ----
-const spectrumDisplay = createSpectrumDisplay($("display-area"));
+let azcEnabled = false; // "Keep frequency centred" - declared before
+// createSpectrumDisplay since its onTune callback closes over it.
+const spectrumDisplay = createSpectrumDisplay($("display-area"), {
+  onTune: (hz) => {
+    client.tune(hz);
+    if (azcEnabled) client.zoomCenter(hz);
+  },
+});
 client.addEventListener("spectrum", (e) => {
   const abs = absoluteCenterHz(e.detail, frontendFrequencyHz);
   spectrumDisplay.render({ ...e.detail, centerHz: abs });
@@ -371,6 +378,58 @@ $("reset-settings").addEventListener("click", () => {
   }
   location.reload();
 });
+
+// ---- Filter edges, CW shift, QuickBW, AZC ----
+$("filter-edges-send").addEventListener("click", () => {
+  const low = Number($("filter-low").value);
+  const high = Number($("filter-high").value);
+  if (Number.isFinite(low) && Number.isFinite(high)) client.setFilterEdges(low, high);
+});
+client.addEventListener("filterEdges", (e) => {
+  $("filter-low").value = String(e.detail.lowHz);
+  $("filter-high").value = String(e.detail.highHz);
+});
+$("shift-send").addEventListener("click", () => {
+  const v = Number($("shift-input").value);
+  if (Number.isFinite(v)) client.setShift(v);
+});
+client.addEventListener("shift", (e) => { $("shift-input").value = String(e.detail.hz); });
+
+// QuickBW: a filter-edges shortcut, not a distinct wire feature - toggles
+// between the current edges and a saved alternate (narrower) preset,
+// reusing setFilterEdges() exactly like stock's applyQuickBW().
+const QUICKBW_KEY = "instrument_quickbw_preset";
+function loadQuickBwPreset() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(QUICKBW_KEY));
+    if (raw && Number.isFinite(raw.lowerOffset) && Number.isFinite(raw.upperOffset)) return raw;
+  } catch (e) { /* ignore */ }
+  return { lowerOffset: 300, upperOffset: 700 };
+}
+let quickBwPreset = loadQuickBwPreset();
+$("quickbw-lower").value = String(quickBwPreset.lowerOffset);
+$("quickbw-upper").value = String(quickBwPreset.upperOffset);
+let quickBwActive = false;
+let quickBwPrevEdges = null;
+$("quickbw-toggle").addEventListener("click", () => {
+  if (!quickBwActive) {
+    quickBwPrevEdges = { low: $("filter-low").value, high: $("filter-high").value };
+    client.setFilterEdges(-quickBwPreset.lowerOffset, quickBwPreset.upperOffset);
+  } else if (quickBwPrevEdges) {
+    client.setFilterEdges(Number(quickBwPrevEdges.low), Number(quickBwPrevEdges.high));
+  }
+  quickBwActive = !quickBwActive;
+});
+$("quickbw-save").addEventListener("click", () => {
+  const lowerOffset = Number($("quickbw-lower").value);
+  const upperOffset = Number($("quickbw-upper").value);
+  if (!Number.isFinite(lowerOffset) || !Number.isFinite(upperOffset)) return;
+  quickBwPreset = { lowerOffset, upperOffset };
+  localStorage.setItem(QUICKBW_KEY, JSON.stringify(quickBwPreset));
+  if (quickBwActive) client.setFilterEdges(-lowerOffset, upperOffset);
+});
+
+$("azc-enable").addEventListener("change", (e) => { azcEnabled = e.target.checked; });
 
 function renderTelemetry() {
   const s = spectrumDisplay.getLastSpectrum();

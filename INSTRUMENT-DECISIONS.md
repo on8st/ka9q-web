@@ -569,3 +569,51 @@ unrelated stock ids** - checked individually rather than assumed:
   fully explicit here, but this is the more consistent choice - a
   "cosmetic only" feature should look cosmetic-free everywhere it's
   drawn, not just on the live trace).
+
+## Filter edges, CW shift, keep-centred (2026-08-11)
+
+All three are real, previously-undocumented wire commands (`PROTOCOL-
+TEXT.md` only covered `F:`/`M:`/`Z:SIZE`) - researched from `radio.js`
+directly before porting, since demod parameters seemed the least likely
+of everything so far to turn out client-only, and that held:
+
+- **Filter edges** (`e:<lowHz>:<highHz>`, always sent as a pair) are Hz
+  *offsets from the tuned carrier*, not absolute Hz. Confirmation comes
+  back via Channel Data TLV tags 39/40 - a **different** pair from
+  `FIELD_FE_LOW_EDGE`/`FIELD_FE_HIGH_EDGE` (100/101, the front end's own
+  IF window, already decoded) - added as new `FIELD_LOW_EDGE`/
+  `FIELD_HIGH_EDGE` constants and a `filterEdges` event on the client.
+- **"CW shift/offset" bundles three genuinely different things under one
+  misleading id-prefix** - checked stock's actual behaviour rather than
+  trusting the `cw_*` naming: `shiftInput`/`sendShiftButton` is the real
+  shift (`t:<hz>`, a post-detection audio/BFO offset meaningful in any
+  mode, not CW-specific despite where it's used most) - the only one
+  ported as a dedicated feature. `cw_instant_button` is actually
+  **QuickBW**, an alternate-bandwidth toggle for USB/LSB that reuses
+  feature 1's `e:` command with no shift/CW involvement at all;
+  `cw_upper_input`/`cw_lower_input`/`cw_save_button` are QuickBW's
+  *offset preset editor* (`localStorage`-only, no direct wire command of
+  its own beyond the conditional edges re-send when saved while active).
+  Ported QuickBW as a toggle button + editable preset (default
+  `{lower:300, upper:700}`, matching stock) since it's a real, useful
+  feature that was already going to need `setFilterEdges()` anyway - not
+  scope creep, just the accurate shape of what "CW shift" actually
+  covers in stock.
+- **`SHIFT:<hz>` was already a documented *inbound* message
+  (`PROTOCOL-TEXT.md`) that this UI's `ws-client.js` silently dropped** -
+  `_onTextMessage` had cases for `BFREQ`/`M`/`ACK`/`BUSY`/`ZSIZE`/`S:` but
+  none for `SHIFT`, so it fell through to the "not yet needed" catch-all.
+  now wired.
+- **"Keep frequency centred" (AZC) had nothing to gate** - confirmed the
+  instrument UI had *no* click-to-tune-on-canvas at all before this (the
+  existing canvas click handler only ever set the display-only Cursor
+  marker, never sent `F:`). Built click-to-tune as this feature's
+  prerequisite rather than leaving AZC honestly-unbuilt like
+  `ckonlyAutoscaleButton` earlier: unlike that case, click-to-tune is
+  independently useful standard SDR UX on its own, not a dead control
+  waiting on an unrelated feature. Simplified from stock's drag-distance/
+  duration-threshold click-vs-drag disambiguation, since this UI has no
+  drag-to-pan yet to distinguish from - a plain click tunes.
+  `createSpectrumDisplay()` gained an `onTune` callback option; AZC
+  itself is just `if (azcEnabled) client.zoomCenter(hz)` right after the
+  tune, reusing the zoom-center command already built.

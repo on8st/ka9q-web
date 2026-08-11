@@ -335,3 +335,51 @@ test("setSpectrumAverage()/setWindow()/setSpectrumOverlap()/setSpectrumPollRate(
     "C:ctest:4:r:200",
   ]);
 });
+
+test("setFilterEdges()/setShift() send e:<low>:<high> and t:<hz>, wrapped in C:", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  client.clientId = "ctest";
+  const { sent, ws } = mockSocket();
+  client._ws = ws;
+
+  client.setFilterEdges(50, 3000);
+  client.setShift(700);
+
+  assert.deepEqual(sent, [
+    "C:ctest:1:e:50:3000",
+    "C:ctest:2:t:700",
+  ]);
+});
+
+test("SHIFT:<hz> sets client.shiftHz and fires a shift event", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  let detail = null;
+  client.addEventListener("shift", (e) => { detail = e.detail; });
+  client._onTextMessage("SHIFT:700");
+  assert.equal(client.shiftHz, 700);
+  assert.deepEqual(detail, { hz: 700 });
+});
+
+test("Channel Data FIELD_LOW_EDGE/FIELD_HIGH_EDGE populate client.filterEdges and fire a filterEdges event", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  let detail = null;
+  client.addEventListener("filterEdges", (e) => { detail = e.detail; });
+  // Hand-built minimal Channel Data (0x7E) frame: 12-byte RTP header
+  // (cc=0, type=0x7E), then LOW_EDGE(39)=50.0 and HIGH_EDGE(40)=3000.0
+  // as big-endian float32 TLVs.
+  const header = new ArrayBuffer(12);
+  new DataView(header).setUint32(0, (0x7e << 16), false);
+  const lowBytes = new Uint8Array(4);
+  new DataView(lowBytes.buffer).setFloat32(0, 50.0, false);
+  const highBytes = new Uint8Array(4);
+  new DataView(highBytes.buffer).setFloat32(0, 3000.0, false);
+  const tlv = new Uint8Array([39, 4, ...lowBytes, 40, 4, ...highBytes]);
+  const buf = new Uint8Array(12 + tlv.length);
+  buf.set(new Uint8Array(header), 0);
+  buf.set(tlv, 12);
+
+  client._onMessage({ data: buf.buffer });
+
+  assert.deepEqual(client.filterEdges, { lowHz: 50, highHz: 3000 });
+  assert.deepEqual(detail, { lowHz: 50, highHz: 3000 });
+});
