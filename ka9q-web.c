@@ -3808,6 +3808,12 @@ static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_
 
   /* Update status values early (keeps some fields fresh) */
   decode_radio_status(&Frontend, &Channel, buffer + 1, rx_length - 1);
+  {
+    static unsigned long dbg_count = 0;
+    if (dbg_count++ % 20 == 0)
+      fprintf(stderr, "DBG spectrum_packet: Frontend.samprate=%d Frontend.frequency=%.3f\n",
+              Frontend.samprate, Frontend.frequency);
+  }
   /* Record that we received a spectrum TLV for this session */
   sp->last_spectrum_recv_ms = now_ms();
 
@@ -3937,6 +3943,14 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
   /* Detect whether this status packet contains an explicit SHIFT_FREQUENCY TLV */
   bool have_shift = tlv_has_type(buffer + 1, rx_length - 1, SHIFT_FREQUENCY);
   decode_radio_status(&Frontend, &Channel, buffer + 1, rx_length - 1);
+  {
+    static unsigned long dbg_count = 0;
+    if (dbg_count++ % 20 == 0)
+      fprintf(stderr, "DBG status_packet: Frontend.samprate=%d Frontend.frequency=%.3f has_samprate_tlv=%d has_lo_tlv=%d\n",
+              Frontend.samprate, Frontend.frequency,
+              tlv_has_type(buffer + 1, rx_length - 1, INPUT_SAMPRATE),
+              tlv_has_type(buffer + 1, rx_length - 1, FIRST_LO_FREQUENCY));
+  }
 
   if (have_shift) {
     double new_shift = Channel.tune.shift;
