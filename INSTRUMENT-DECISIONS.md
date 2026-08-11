@@ -248,20 +248,38 @@ check, since the race is about `render()`'s own contract and doesn't need
 a real browser to verify.
 
 **A sixth issue, reported by the station operator during a functionality
-review**: VHF and UHF opened on a brand-new session showing
-`000.000.000` MHz instead of any usable frequency, while HF opened
-correctly at 10.000.000 MHz (WWV). Reproduced directly: forced fresh
-sessions (container restart drops ka9q-web's in-memory, per-client-IP
-session state) and confirmed live - VHF/UHF stuck at all-zero digits, HF
-fine. Root cause: `ka9q-web.c`'s session-init code (`sp->frequency =
-10000000`) hardcodes 10 MHz - a genuinely good default for HF (a real,
-known signal) - for every front end unconditionally. 10 MHz is nowhere
-near VHF's (~144-146 MHz) or UHF's (~430-440 MHz) receivable range, so
-the channel never locks onto anything and the client never receives a
-`tunedFreq` echo to replace its initial placeholder - it just sits there
-looking broken until someone tunes it manually. Fixed by keeping the
-10 MHz default only when it actually falls within the front end's real
-coverage (`Frontend.frequency + frontend_if_bounds()`, the same bound
-calculation `check_frequency()` already uses); otherwise defaulting to
-the centre of that coverage, so every front end now opens somewhere
-receivable.
+review**: VHF and UHF appeared to open on a brand-new session showing
+`000.000.000` MHz, while HF opened correctly at 10.000.000 MHz (WWV).
+Investigated by forcing fresh sessions (container restart drops
+ka9q-web's in-memory, per-client-IP session state) - this did NOT
+reproduce reliably: 6 separate fresh-restart attempts (3 on unmodified
+code, 3 on an in-progress fix) all showed VHF opening at a clean
+`010.000.000`, never `000.000.000`. The original report was most likely
+a one-off race or a transient artifact of that specific test run (all
+three containers restarted simultaneously), not a deterministic bug -
+recorded here rather than silently dropped, since it couldn't be
+conclusively ruled out either.
+
+What IS real and worth fixing regardless: `ka9q-web.c`'s session-init
+code (`sp->frequency = 10000000`) hardcodes 10 MHz - a genuinely good
+default for HF (a real, known signal) - for every front end
+unconditionally, including VHF (~144-146 MHz) and UHF (~430-440 MHz)
+where it's nowhere near the receivable range. The channel does still
+tune and echo back correctly (confirmed: the digits reliably show
+`010000000`, not garbage), so this was never actually "stuck" - just a
+meaningless out-of-coverage default a new visitor would have to
+immediately re-tune away from. Fixed by keeping the 10 MHz default only
+when it actually falls within the front end's real coverage
+(`Frontend.frequency + frontend_if_bounds()`, the same bound calculation
+`check_frequency()` already uses); otherwise defaulting to the centre of
+that coverage. This only takes effect once `Frontend` has real data
+(true for effectively every real-world connection - front ends here run
+for weeks between restarts - but not the very first connection right
+after a fresh container restart, before any status traffic has flowed).
+Also fixed along the way: the correction math read `Frontend.frequency`
+without checking it for NaN first (it's NAN-initialized until real data
+arrives - see its init a few hundred lines up) - casting NaN to
+`int64_t` is undefined behaviour in C, and an earlier version of this
+fix hit exactly that, which is what actually produced a genuine
+`000000000` freeze during testing. Guarded with `!isnan(...)` alongside
+the existing `Frontend.samprate > 0` check.

@@ -1949,15 +1949,15 @@ onion_connection_status home(void *data, onion_request * req,
   /* adoptOnParameterMismatch removed; adoption controlled server-side by backend shift */
 
 
-  /* 10 MHz (WWV) is a deliberately good HF default - a real, known signal.
-     It's not a default at all for a tuner-based front end (VHF/UHF): it's
-     simply outside the receivable range, so the channel never locks onto
-     anything and the client never gets a tunedFreq echo to replace its
-     initial placeholder display (confirmed live: VHF/UHF sessions stuck
-     showing all-zero frequency until manually tuned). Keep 10 MHz when
-     it's actually receivable; otherwise default to the centre of the
-     front end's real coverage so every front end opens on something
-     valid. */
+  /* 10 MHz (WWV) is a deliberately good HF default - a real, known signal -
+     but it's outside VHF/UHF's receivable range entirely. Keep it when it's
+     actually receivable on this front end; otherwise default to the centre
+     of the front end's real coverage. Only possible once Frontend has real
+     data (populated by an active session's own status traffic, not yet
+     true for the very first connection right after a fresh restart) -
+     Frontend.frequency is NAN until then (see its init above), and casting
+     NaN to int64_t is undefined behaviour, so both must be checked before
+     trusting these values, not just samprate. */
   sp->frequency = 10000000;
   if (Frontend.samprate > 0 && !isnan(Frontend.frequency)) {
     double lo_if, hi_if;
@@ -1966,11 +1966,6 @@ onion_connection_status home(void *data, onion_request * req,
     int64_t const hi_bound = (int64_t)round(Frontend.frequency + hi_if);
     if (hi_bound > lo_bound && (sp->frequency < lo_bound || sp->frequency > hi_bound))
       sp->frequency = (uint32_t)round((lo_bound + hi_bound) / 2.0);
-    fprintf(stderr, "[freq-default DEBUG] samprate=%.0f frequency=%.0f min_IF=%.0f max_IF=%.0f lo_if=%.0f hi_if=%.0f lo_bound=%lld hi_bound=%lld -> sp->frequency=%u\n",
-            Frontend.samprate, Frontend.frequency, Frontend.min_IF, Frontend.max_IF, lo_if, hi_if, (long long)lo_bound, (long long)hi_bound, sp->frequency);
-  } else {
-    fprintf(stderr, "[freq-default DEBUG] skipped: samprate=%.0f frequency=%.0f (isnan=%d) -> sp->frequency=%u\n",
-            Frontend.samprate, Frontend.frequency, isnan(Frontend.frequency), sp->frequency);
   }
   int level = 0;
   if (Frontend.samprate > 0) {
