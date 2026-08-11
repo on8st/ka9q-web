@@ -617,3 +617,14 @@ of everything so far to turn out client-only, and that held:
   `createSpectrumDisplay()` gained an `onTune` callback option; AZC
   itself is just `if (azcEnabled) client.zoomCenter(hz)` right after the
   tune, reusing the zoom-center command already built.
+- **Caught live, not by a test: the exact same input-clobbering race this
+  session already found and fixed once for the frequency digits.**
+  `filter-low`/`filter-high`/`shift-input` all get reflected from server
+  echoes (`filterEdges`/`shift` events, which arrive periodically,
+  independent of user action - same pattern as the earlier `tunedFreq`
+  echo race). The first version blindly overwrote these inputs on every
+  echo; typing `50` into `filter-low` then waiting 2s reverted it back to
+  the server's last-known value (`-5000`) before the Send button was ever
+  clicked - confirmed live via a direct fill-then-wait test, not assumed.
+  Fixed with the same guard as `freq-digits.js`: skip the overwrite while
+  `document.activeElement` is the input being typed into.

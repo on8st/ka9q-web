@@ -380,20 +380,28 @@ $("reset-settings").addEventListener("click", () => {
 });
 
 // ---- Filter edges, CW shift, QuickBW, AZC ----
+// Server echoes (filterEdges/shift events) arrive periodically,
+// independent of what the user is doing - same race this session already
+// found and fixed once for the frequency digits (freq-digits.js's
+// `editing` flag): blindly overwriting these inputs on every echo would
+// yank a value out from under the user mid-type. Guard the same way -
+// only reflect an echo while the input isn't focused.
 $("filter-edges-send").addEventListener("click", () => {
   const low = Number($("filter-low").value);
   const high = Number($("filter-high").value);
   if (Number.isFinite(low) && Number.isFinite(high)) client.setFilterEdges(low, high);
 });
 client.addEventListener("filterEdges", (e) => {
-  $("filter-low").value = String(e.detail.lowHz);
-  $("filter-high").value = String(e.detail.highHz);
+  if (document.activeElement !== $("filter-low")) $("filter-low").value = String(e.detail.lowHz);
+  if (document.activeElement !== $("filter-high")) $("filter-high").value = String(e.detail.highHz);
 });
 $("shift-send").addEventListener("click", () => {
   const v = Number($("shift-input").value);
   if (Number.isFinite(v)) client.setShift(v);
 });
-client.addEventListener("shift", (e) => { $("shift-input").value = String(e.detail.hz); });
+client.addEventListener("shift", (e) => {
+  if (document.activeElement !== $("shift-input")) $("shift-input").value = String(e.detail.hz);
+});
 
 // QuickBW: a filter-edges shortcut, not a distinct wire feature - toggles
 // between the current edges and a saved alternate (narrower) preset,
