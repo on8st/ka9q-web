@@ -12,7 +12,6 @@ import { bandsInCoverage, BAND_OPTIONS } from "./band-options.js";
 import { loadMemories, addMemory, deleteMemory, replaceMemories, exportMemoriesJson, importMemoriesJson } from "./memories.js";
 import { createMeter } from "./meter.js";
 import { createSpectrumDisplay, COLORMAP_NAMES } from "./spectrum-canvas.js";
-import { absoluteCenterHz } from "./spectrum-decode.js";
 import { loadNotes, saveNotes } from "./notes.js";
 import { spectrumToCsv } from "./spectrum-export.js";
 import { createAudioPlayer } from "./audio.js";
@@ -20,7 +19,7 @@ import { createAudioPlayer } from "./audio.js";
 const $ = (id) => document.getElementById(id);
 let currentFreqHz = null;
 let stepHz = 1000;
-let frontendFrequencyHz = 0; // FIRST_LO_FREQUENCY, needed to make spectrum's baseband-relative centerHz absolute (PROTOCOL-SPECTRUM.md)
+let frontendFrequencyHz = 0; // FIRST_LO_FREQUENCY - the front end's real tuned centre, used for "Hide DC spike"'s bin lookup, not for correcting centerHz (which is already absolute - see PROTOCOL-SPECTRUM.md)
 let currentCoverage = { lowHz: 0, highHz: 0 };
 
 const MODES = ["cwu", "cwl", "usb", "lsb", "am", "sam", "fm", "iq", "isb", "user1", "user2", "user3"];
@@ -68,8 +67,14 @@ const spectrumDisplay = createSpectrumDisplay($("display-area"), {
   },
 });
 client.addEventListener("spectrum", (e) => {
-  const abs = absoluteCenterHz(e.detail, frontendFrequencyHz);
-  spectrumDisplay.render({ ...e.detail, centerHz: abs });
+  // centerHz is already absolute RF Hz (sp->center_frequency, server-
+  // side - see ka9q-web.c's session-init comment and PROTOCOL-SPECTRUM.md).
+  // No FIRST_LO_FREQUENCY addition needed or wanted - stock's own
+  // radio.js uses the wire value directly too. A prior version of this
+  // line added frontendFrequencyHz on top, based on a since-corrected
+  // misreading of the wire format (masked for HF, where the front end's
+  // own LO happens to be ~0 - see PROTOCOL-SPECTRUM.md's full account).
+  spectrumDisplay.render(e.detail);
   lastInputSamprate = e.detail.inputSamprate;
   renderMeterNow(); // OVR decays moment-to-moment - refresh every frame, not just on frontend/signalMetrics updates
 });

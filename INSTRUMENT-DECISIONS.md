@@ -737,3 +737,65 @@ frequency on screen, matching HF's frequency-offset fix's own reasoning)
 and width cap `Fs` (the full sample rate), so the deliberately-added wide
 `zoom_table` entries for VHF/UHF finally become reachable as the actual
 default.
+
+**This fix was wrong, and caused a live regression to stock's own
+VHF/UHF spectrum display - corrected the same day, full account below.**
+
+## Correcting the correction: centerHz is absolute, not baseband-relative (2026-08-11)
+
+The fix directly above set `sp->center_frequency = 0` for complex/IQ
+front ends, reasoning from `PROTOCOL-SPECTRUM.md`'s own documented
+"baseband-relative" wire convention. That documented convention was
+itself wrong - derived only from HF data, where `Frontend.frequency`
+(the RX888's LO) is ~0 Hz, making "absolute" and "baseband-relative"
+mathematically indistinguishable. See `PROTOCOL-SPECTRUM.md`'s "centerHz
+is absolute, not baseband-relative" section for the full derivation and
+the two independent confirmations (stock's `radio.js` uses the wire
+value directly with no LO addition; every other server function
+touching `sp->center_frequency` - `check_frequency()`/`zoom_to()`/
+`adjust_center_within_bounds()` - already treats it as absolute, with
+comments from an earlier fix in this fork explicitly reasoning about it
+that way).
+
+**What actually happened, mechanically**: this instrument UI's own
+client code (`spectrum-decode.js`'s `absoluteCenterHz()`) added
+`FIRST_LO_FREQUENCY` on top of `centerHz` - a bug that predates today,
+invisible for HF (adding ~0 changes nothing) but wrong in general. The
+*first* version of today's default-view fix (setting server-side
+`center_frequency=0` for complex front ends) combined with that
+client-side bug to produce a **coincidentally correct** result for this
+specific instrument UI: `0 + FIRST_LO_FREQUENCY = FIRST_LO_FREQUENCY`,
+the right absolute number, by two wrongs cancelling out. It looked
+verified (screenshots showed VHF centred exactly on 145.000 MHz) and
+was deployed. **Stock's own page was never checked against this same
+fix** - stock uses the wire value directly with no addition, so it
+displayed the literal `0` sent by the (actually broken) server change,
+regressing its own spectrum axis. This surfaced as a live report: VHF
+and UHF "not centred on their band," then more specifically "VHF sits
+in the 300MHz region, UHF in the 800MHz region" once the *client-side*
+bug was also (re-)applied on top of a corrected, genuinely-absolute
+server value - i.e. the doubling appeared only *after* fixing the
+server side in isolation, which is what made the two-bugs-cancelling-out
+structure legible rather than another unexplained number.
+
+**The real, complete fix** (superseding the version above): server-side,
+`sp->center_frequency` is now computed as genuinely absolute
+(`Frontend.frequency + (lo_if + hi_if)/2`, using the exact same
+`frontend_if_bounds()` helper `zoom_to()`/`check_frequency()`/
+`adjust_center_within_bounds()` already use, rather than a second,
+cruder approximation) for every front end type - no `Frontend.isreal`
+branch needed at all here, since `frontend_if_bounds()` already
+encapsulates that distinction internally. Client-side, `app.js` no
+longer calls `absoluteCenterHz()` at all (function removed from
+`spectrum-decode.js`) - `centerHz` is used exactly as received, matching
+stock. Verified this time by checking **both** interfaces on **both**
+affected receivers, not just the instrument UI on one.
+
+**Lesson for this fork going forward**: a finding drawn from a single
+front end's data (especially HF, whose direct-sampling LO≈0 quietly
+collapses several otherwise-distinct hypotheses into one) needs
+explicit re-verification against a front end where those hypotheses
+would actually diverge before being treated as a general protocol fact
+- and any fix building on such a finding needs the *other* client (here,
+stock) checked too when the server behavior it depends on changes, even
+if that other client is nominally "someone else's problem."

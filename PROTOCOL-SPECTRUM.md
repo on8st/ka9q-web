@@ -21,7 +21,7 @@ big-endian) for the first three fields, `true` for every field after).
 | Offset | Size | Endian | Field | Notes |
 |---|---|---|---|---|
 | 0 | 4 | BE | `binCount` | Number of bins that follow. Always 1620 on this station regardless of zoom level - matches every `zoom_table` entry in `ka9q-web.c`. |
-| 4 | 4 | BE | `centerHz` | Centre of the displayed span, **baseband-relative** - see "Baseband-relative, not absolute RF" below. |
+| 4 | 4 | BE | `centerHz` | Centre of the displayed span, **absolute RF Hz** - see "centerHz is absolute, not baseband-relative" below (this entry was wrong in an earlier pass of this doc). |
 | 8 | 4 | BE | `frequencyHz` | The channel's tuned frequency - same field/semantics as `BFREQ` (`PROTOCOL-TEXT.md`), just delivered via this binary packet too. Confirmed identical value (`10000000`, the stale no-session default) across all three instances' fixtures. |
 | 12 | 4 | BE | `binWidthHz` | Hz per bin. `binWidthHz * binCount` = displayed span width. |
 | 16 | 4 | LE | `input_samprate` | Confirmed matches each front end's real sample rate: 2,400,000 (VHF), 20,000,000 (UHF), 64,800,000 (HF). |
@@ -53,26 +53,61 @@ Byte value `128` (the frame's actual floor in the captured fixtures) with
 since no real, currently-tuned session was active in any of the captured
 fixtures.
 
-## Baseband-relative, not absolute RF
+## centerHz is absolute, not baseband-relative (corrected 2026-08-11)
 
-`centerHz` is relative to the front end's own baseband, **not** an
-absolute RF frequency - confirmed directly: HF's fixture shows
-`centerHz=16,200,000`, exactly half of `binWidthHz * binCount`
-(`20,000 * 1620 = 32,400,000`), consistent with a baseband window
-centred on 0 Hz (HF's RX888 is direct-sampling, so baseband centre ==
-absolute RF centre there). This is **exactly the same 0-Hz assumption**
-this fork's frequency-offset fix (`ka9q-web.c`/`radio.js`, `on8st-vhf-uhf`
-branch) already had to correct for the *tuned-frequency* display - the
-same correction applies here: an instrument UI must add the front end's
-real tuned centre (`FIRST_LO_FREQUENCY`, `tests/decode_status.py` /
-`html/instrument/status-decode.js`) to `centerHz` to get the real
-absolute RF frequency axis for the spectrum display. Not yet re-derived
-independently for VHF/UHF in this pass (their fixtures' `centerHz` values
-reflect this specific test session's leftover zoom/pan state, not a clean
-baseline) - the HF cross-check is what actually confirms the relationship,
-and the existing frequency-offset fix's own client-side math
-(`getIfBounds()`, `spectrum.js`) is the reference implementation to follow
-for the general (possibly-asymmetric) case.
+**This section originally concluded the opposite - that finding was
+wrong, and stayed wrong for a while because it was derived entirely from
+HF data, where the mistake is invisible.** Corrected here with the full
+account, since it caused a real live regression before being caught.
+
+`centerHz` (`sp->center_frequency`, `ka9q-web.c`) is **absolute RF Hz**,
+matching every other frequency field in this protocol - confirmed
+definitively two ways:
+1. **Stock's own client (`html/radio.js`) uses the wire value directly**,
+   with no `FIRST_LO_FREQUENCY` addition anywhere in its decode path
+   (`spectrum.setCenterHz(centerHz)`, unmodified).
+2. **Every other server-side function that touches `sp->center_frequency`
+   treats it as absolute already** - `check_frequency()`, `zoom_to()`,
+   and `adjust_center_within_bounds()` all compare it directly against
+   `Frontend.frequency`-derived absolute bounds (`frontend_if_bounds()`),
+   with detailed comments from an earlier fix in this same fork
+   explicitly reasoning about it as absolute (e.g. `check_frequency()`'s
+   own comment on a `145000010 -> 4294547296` uint32 wraparound bug it
+   fixed - only possible if the value being manipulated was already in
+   the ~145 MHz absolute range).
+
+The original "baseband-relative" conclusion came from HF's fixture
+alone: `centerHz=16,200,000`, exactly half of `binWidthHz * binCount`
+(`32,400,000`) - which looks like "a baseband window centred on 0 Hz"
+*only* because HF's own `Frontend.frequency` (the RX888's LO) happens to
+be ~0 Hz (direct sampling, no tuner). For HF, "absolute" and "the middle
+of a 0-centred baseband window" are numerically identical, so the two
+hypotheses were indistinguishable from HF data alone - the doc's own
+"not yet re-derived independently for VHF/UHF" caveat correctly flagged
+this as unverified, but the conclusion was still shipped as fact and
+propagated into a client-side correction (`absoluteCenterHz()`,
+`html/instrument/spectrum-decode.js` - since removed) that added
+`FIRST_LO_FREQUENCY` on top of an already-absolute value. That extra
+addition was invisible for HF (adding ~0 to an already-correct value)
+and produced a plausible-*looking* result for VHF/UHF **only by
+coincidence**: a separate, simultaneous server-side bug (an earlier
+version of the session-init default-view fix, see `ka9q-web.c`'s own
+comment there) was sending a genuinely baseband-relative `0` for
+complex/IQ front ends at that specific moment, which the client's wrong
+addition then "corrected" back to the right absolute number - two bugs
+briefly cancelling out. The moment the server-side bug was fixed (to
+correctly send an absolute value), the client's still-wrong addition
+started doubling the displayed centre frequency instead - caught via a
+live report (VHF showing ~300 MHz, UHF ~800 MHz, roughly double their
+true ~145 MHz / ~435 MHz centres) before it was understood as two
+separate, individually-necessary fixes rather than one.
+
+**Takeaway for future work on this field**: `centerHz` needs no
+correction on the client - use it exactly as received, same as stock
+does. If a genuinely baseband-relative value is ever needed again for
+some other purpose, derive it explicitly (`centerHz - Frontend.frequency`
+via the Channel Data `FIRST_LO_FREQUENCY` field) rather than assuming the
+wire field itself is relative.
 
 ## Bin order bug for real-sampled front ends (fixed, `on8st-vhf-uhf`)
 

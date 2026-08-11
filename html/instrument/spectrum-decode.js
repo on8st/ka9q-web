@@ -50,13 +50,11 @@ export function decodeSpectrumFrame(frame) {
   return { binCount, centerHz, frequencyHz, binWidthHz, inputSamprate, ifPowerDb, zoomLevel, binsDb, adOver, noiseBwHz, rfAttenDb, rfGainDb };
 }
 
-/**
- * centerHz in the packet is baseband-relative, not absolute RF (see
- * PROTOCOL-SPECTRUM.md "Baseband-relative, not absolute RF" - the same
- * 0Hz assumption the frequency-offset fix already corrects for tuned
- * frequency). frontendFrequencyHz is FIRST_LO_FREQUENCY from the Channel
- * Data stream (status-decode.js) - the front end's real tuned centre.
- */
-export function absoluteCenterHz(spectrum, frontendFrequencyHz) {
-  return spectrum.centerHz + (frontendFrequencyHz || 0);
-}
+// NOTE: centerHz in the packet is already absolute RF Hz (sp->
+// center_frequency, server-side) - it does NOT need FIRST_LO_FREQUENCY
+// added on top. A function here once did that (absoluteCenterHz(),
+// removed) based on an incorrect early reading of the wire format,
+// masked for HF (whose own front-end LO happens to be ~0 Hz) until a
+// live report on VHF/UHF (non-zero LO) surfaced it as a doubled centre
+// frequency. See PROTOCOL-SPECTRUM.md for the full correction and
+// ka9q-web.c's session-init comment for the server-side half of this.

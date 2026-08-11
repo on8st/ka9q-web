@@ -1970,33 +1970,40 @@ onion_connection_status home(void *data, onion_request * req,
   int level = 0;
   if (Frontend.samprate > 0) {
     /* Center the default view on the real front end's usable band, and
-       pick the widest zoom level that still fits its usable bandwidth -
-       previously disabled (#if 0) in favor of a fixed level=6 (~3.24 MHz
-       span) regardless of the actual front end, which is far too narrow
-       for HF's ~30 MHz of real bandwidth (64.8 Msps direct sampling).
+       pick the widest zoom level that still fits its real usable width.
+       Reuses frontend_if_bounds() - the SAME already-established, tested
+       helper zoom_to()/check_frequency()/adjust_center_within_bounds()
+       all use elsewhere in this file for exactly this real-vs-complex
+       front end distinction - rather than inventing a second, cruder
+       approximation.
 
-       "Usable bandwidth" and "center" both depend on Frontend.isreal,
-       same real-vs-complex-FFT distinction already fixed once for the
-       spectrum bin-order seam (handle_bin_data(), see PROTOCOL-SPECTRUM.md)
-       - this is the same class of bug in a different function, never
-       touched by that fix. A real->complex FFT (HF's direct-sampling
-       RX888) has baseband spanning [0, Nyquist] - centre Fs/4, usable
-       width Fs/2 (Nyquist), both already correct below. A complex->complex
-       FFT (VHF/UHF's Airspy, IQ-sampled) instead spans the FULL sample
-       rate [-Fs/2, +Fs/2] centred on the tuner's own LO (0 Hz baseband =
-       Frontend.frequency absolute) - using the real-front-end formula
-       there put centre_frequency a quarter-samprate off the true LO
-       centre, and capped the search at Nyquist (Fs/2) instead of the
-       full Fs, making the zoom_table entries specifically added for "this
-       station's full capture bandwidth" (e.g. the 1480Hz/2.4MHz VHF entry
-       above) mathematically unreachable - confirmed live: VHF's own
-       widest achievable entry under the old Nyquist-only cap was 500Hz/
-       810kHz, nowhere near its real 2.4MHz capture width. */
-    double const usable_span = Frontend.isreal ? Frontend.samprate/2.0 : Frontend.samprate;
-    sp->center_frequency = Frontend.isreal ? round(Frontend.samprate/4.0) : 0;
+       IMPORTANT, found the hard way: sp->center_frequency is ABSOLUTE RF
+       Hz everywhere else in this codebase (check_frequency()/zoom_to()/
+       adjust_center_within_bounds() all compare it directly against
+       Frontend.frequency-derived absolute bounds) - it is NOT baseband-
+       relative. An earlier version of this exact fix set it to 0
+       (baseband-relative) for complex/IQ front ends, reasoning from
+       PROTOCOL-SPECTRUM.md's documented wire-packet convention - but that
+       finding was itself wrong, derived only from HF data where
+       Frontend.frequency≈0 makes "absolute" and "baseband-relative"
+       indistinguishable. The stock UI (radio.js) confirms this: it uses
+       the wire centerHz value directly with no LO addition at all. Setting
+       it to 0 sent literally 0 to every client including stock, which
+       displayed it as-is - a live regression to stock's own VHF/UHF
+       spectrum axis, confirmed by a real report (VHF centred near 300MHz,
+       UHF near 800MHz - roughly double the true centre - because this
+       instrument UI's own client-side code separately, mistakenly added
+       FIRST_LO_FREQUENCY on top of what should already have been
+       absolute, so the *instrument* UI's own display looked right by
+       coincidence of two bugs cancelling out, while stock's didn't).
+       See spectrum-decode.js for the matching client-side correction. */
+    double lo_if, hi_if;
+    frontend_if_bounds(&lo_if, &hi_if);
+    sp->center_frequency = isnan(Frontend.frequency) ? 0
+      : (uint32_t)round(Frontend.frequency + (lo_if + hi_if) / 2.0);
     const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
     for(; level < table_size; level++)
-      if(zoom_table[level].bin_width * zoom_table[level].bin_count <= round(usable_span))
+      if(zoom_table[level].bin_width * zoom_table[level].bin_count <= round(hi_if - lo_if))
         break;
     if (level >= table_size)
       level = table_size - 1; /* nothing fit (shouldn't happen) - narrowest, not out of bounds */

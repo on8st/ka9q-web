@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { decodeSpectrumFrame, absoluteCenterHz } from "../../html/instrument/spectrum-decode.js";
+import { decodeSpectrumFrame } from "../../html/instrument/spectrum-decode.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(__dirname, "..", "fixtures");
@@ -95,13 +95,6 @@ test("bin bytes decode using offset + gain, with the 0.5 fallback when gain is 0
   // Every observed byte in the real fixture was 128 (flat noise floor) -
   // confirms the decode arithmetic rather than just trusting binCount.
   assert.ok(s.binsDb.every((v) => Number.isFinite(v)));
-});
-
-test("absoluteCenterHz adds the front end's real tuned centre, defaulting to 0 if unknown", () => {
-  const s = firstSpectrumFrame("hf.bin");
-  assert.equal(absoluteCenterHz(s, 0), s.centerHz);
-  assert.equal(absoluteCenterHz(s, 145_500_000), s.centerHz + 145_500_000);
-  assert.equal(absoluteCenterHz(s, undefined), s.centerHz);
 });
 
 test("returns null for a truncated frame instead of drawing garbage", () => {
