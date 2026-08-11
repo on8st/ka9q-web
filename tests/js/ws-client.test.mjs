@@ -190,3 +190,92 @@ test("startSpectrum()/stopSpectrum() send raw S:/S:STOP, NOT wrapped in the C: e
 
   assert.deepEqual(sent, ["S:", "S:STOP"]);
 });
+
+test("S:<ssrc> captures the numeric SSRC and fires an ssrc event", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  let detail = null;
+  client.addEventListener("ssrc", (e) => { detail = e.detail; });
+  client._onTextMessage("S:2104852690");
+  assert.equal(client.ssrc, 2_104_852_690);
+  assert.deepEqual(detail, { ssrc: 2_104_852_690 });
+});
+
+test("S:<ssrc> with a non-numeric/empty arg is ignored, not stored as NaN", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  client._onTextMessage("S:");
+  assert.equal(client.ssrc, null);
+});
+
+test("setAudioEncoding()/startAudio()/stopAudio() are no-ops until ssrc is known", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  client.clientId = "ctest";
+  const { sent, ws } = mockSocket();
+  client._ws = ws;
+
+  client.setAudioEncoding(true);
+  client.startAudio();
+  client.stopAudio();
+
+  assert.deepEqual(sent, [], "no ssrc yet - nothing should be sent");
+});
+
+test("audio commands are wrapped in the C: envelope (unlike raw S:/S:STOP) and addressed to this session's ssrc", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  client.clientId = "ctest";
+  const { sent, ws } = mockSocket();
+  client._ws = ws;
+  client._onTextMessage("S:2104852690");
+
+  client.setAudioEncoding(true);
+  client.startAudio();
+  client.stopAudio();
+  client.setAudioEncoding(false);
+
+  assert.deepEqual(sent, [
+    "C:ctest:1:O:PCM:2104852690",
+    "C:ctest:2:A:START:2104852690",
+    "C:ctest:3:A:STOP:2104852690",
+    "C:ctest:4:O:OPUS:2104852690",
+  ]);
+});
+
+test("audio frame (PT 0x6F Opus) fires an audioFrame event and does not update frontend/spectrum", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  let audioDetail = null;
+  let otherFired = false;
+  client.addEventListener("audioFrame", (e) => { audioDetail = e.detail; });
+  client.addEventListener("frontend", () => { otherFired = true; });
+  client.addEventListener("spectrum", () => { otherFired = true; });
+
+  // Minimal 12-byte RTP header (cc=0) with PT=0x6F (Opus), plus 3 payload bytes.
+  const buf = new ArrayBuffer(15);
+  new DataView(buf).setUint32(0, (0x6f << 16), false);
+  new Uint8Array(buf, 12, 3).set([1, 2, 3]);
+
+  client._onMessage({ data: buf });
+
+  assert.ok(audioDetail, "audioFrame event should have fired");
+  assert.equal(audioDetail.encoding, "opus");
+  assert.deepEqual(Array.from(audioDetail.payload), [1, 2, 3]);
+  assert.equal(otherFired, false);
+});
+
+test("OUTPUT_SAMPRATE/OUTPUT_CHANNELS Channel Data fields populate client.audioOutput", () => {
+  const client = new Ka9qWebClient("ws://unused/");
+  const buf = readAudioMetaFixture();
+  client._onMessage({ data: buf });
+  assert.deepEqual(client.audioOutput, { samprate: 12000, channels: 1, encoding: null });
+});
+
+function readAudioMetaFixture() {
+  // Hand-built minimal Channel Data (0x7E) frame: 12-byte RTP header
+  // (cc=0, type=0x7E), then two TLV fields - OUTPUT_SAMPRATE(20)=12000
+  // (2 bytes: 0x2E,0xE0) and OUTPUT_CHANNELS(49)=1 (1 byte: 0x01).
+  const header = new ArrayBuffer(12);
+  new DataView(header).setUint32(0, (0x7e << 16), false);
+  const tlv = new Uint8Array([20, 2, 0x2e, 0xe0, 49, 1, 1]);
+  const buf = new Uint8Array(12 + tlv.length);
+  buf.set(new Uint8Array(header), 0);
+  buf.set(tlv, 12);
+  return buf.buffer;
+}

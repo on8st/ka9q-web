@@ -114,6 +114,7 @@ input.k.num{width:64px;text-align:right}
 input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(--live);outline-offset:1px}
 .chk{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px}
 .chk input{accent-color:var(--live);margin:0}
+.pop-body input[type=range]{accent-color:var(--live);width:100%}
 #meter-analog{display:block;width:116px;height:48px}
 #meter-analog[hidden]{display:none}
 
@@ -175,6 +176,7 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
         <div class="minibar" id="meter-bar"><i style="width:0%"></i></div>
         <canvas id="meter-analog" width="116" height="48" hidden></canvas>
       </div>
+      <div class="sgm" id="sgm-audio"><span class="cap">Audio</span><span class="val" id="audio-state">Off</span></div>
     </div>
   </div>
 
@@ -198,6 +200,8 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
   </aside>
 </div>
 
+<script src="../pcm-player.js"></script>
+<script src="../opus-decoder.min.js"></script>
 <script type="module" src="app.js"></script>
 </body>
 </html>

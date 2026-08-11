@@ -23,6 +23,9 @@ export const FIELD_FIRST_LO_FREQUENCY = 34;
 export const FIELD_FE_LOW_EDGE = 100;
 export const FIELD_FE_HIGH_EDGE = 101;
 export const FIELD_FE_ISREAL = 102;
+export const FIELD_OUTPUT_SAMPRATE = 20;
+export const FIELD_OUTPUT_CHANNELS = 49;
+export const FIELD_OUTPUT_ENCODING = 107;
 
 /**
  * Returns a Map of field_id -> Uint8Array for every TLV field in this

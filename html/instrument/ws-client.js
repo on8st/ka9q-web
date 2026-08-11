@@ -13,13 +13,18 @@ import {
   FIELD_FIRST_LO_FREQUENCY,
   FIELD_IF_POWER,
   FIELD_INPUT_SAMPRATE,
+  FIELD_OUTPUT_CHANNELS,
+  FIELD_OUTPUT_ENCODING,
+  FIELD_OUTPUT_SAMPRATE,
   asBool,
   asFloat32,
   asFloat64,
   asText,
+  asUint,
   decodeChannelDataFields,
 } from "./status-decode.js";
 import { decodeSpectrumFrame } from "./spectrum-decode.js";
+import { decodeAudioFrame } from "./audio-decode.js";
 
 function parseBfreq(raw) {
   const v = parseFloat(raw);
@@ -38,6 +43,8 @@ export class Ka9qWebClient extends EventTarget {
     this.frontend = null; // { descriptionText, frequencyHz, isReal, ifLowHz, ifHighHz, inputSamprate, ifPowerDb }
     this.tunedFreqHz = null; // last BFREQ, or null if this session has never received one (see PROTOCOL-TEXT.md - not guaranteed on connect)
     this.mode = null;
+    this.ssrc = null; // from the server's own "S:<ssrc>" text message - required for every A:/O: audio command
+    this.audioOutput = null; // { samprate, channels, encoding }, from OUTPUT_SAMPRATE/OUTPUT_CHANNELS/OUTPUT_ENCODING TLV fields - authoritative for PCM playback config, see audio.js
     this._fields = new Map();
     this._ws = null;
   }
@@ -97,6 +104,25 @@ export class Ka9qWebClient extends EventTarget {
     this._sendCommand(`M:${mode}`);
   }
 
+  /** Selects the audio encoding the server transmits for this session -
+   * must be sent before startAudio() and re-sent after stopAudio() to
+   * keep backend state aligned even while stopped (order ported exactly
+   * from radio.js's audio_start_stop()). No-op until this.ssrc is known. */
+  setAudioEncoding(usePcm) {
+    if (this.ssrc == null) return;
+    this._sendCommand(`O:${usePcm ? "PCM" : "OPUS"}:${this.ssrc}`);
+  }
+
+  startAudio() {
+    if (this.ssrc == null) return;
+    this._sendCommand(`A:START:${this.ssrc}`);
+  }
+
+  stopAudio() {
+    if (this.ssrc == null) return;
+    this._sendCommand(`A:STOP:${this.ssrc}`);
+  }
+
   _sendCommand(raw) {
     if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return;
     this.seq += 1;
@@ -113,6 +139,11 @@ export class Ka9qWebClient extends EventTarget {
       this.dispatchEvent(new CustomEvent("spectrum", { detail: spectrum }));
       return;
     }
+    const audio = decodeAudioFrame(evt.data);
+    if (audio) {
+      this.dispatchEvent(new CustomEvent("audioFrame", { detail: audio }));
+      return;
+    }
     const fields = decodeChannelDataFields(evt.data);
     if (!fields) return;
     for (const [k, v] of fields) this._fields.set(k, v);
@@ -126,6 +157,16 @@ export class Ka9qWebClient extends EventTarget {
       ifPowerDb: this._fields.has(FIELD_IF_POWER) ? asFloat32(this._fields.get(FIELD_IF_POWER)) : null,
     };
     this.dispatchEvent(new CustomEvent("frontend", { detail: this.frontend }));
+    // Backend-reported PCM output config - authoritative for playback
+    // (see audio.js), tracked separately from `frontend` since it
+    // describes this session's output stream, not the front-end hardware.
+    if (this._fields.has(FIELD_OUTPUT_SAMPRATE) || this._fields.has(FIELD_OUTPUT_CHANNELS) || this._fields.has(FIELD_OUTPUT_ENCODING)) {
+      this.audioOutput = {
+        samprate: this._fields.has(FIELD_OUTPUT_SAMPRATE) ? asUint(this._fields.get(FIELD_OUTPUT_SAMPRATE)) : null,
+        channels: this._fields.has(FIELD_OUTPUT_CHANNELS) ? asUint(this._fields.get(FIELD_OUTPUT_CHANNELS)) : null,
+        encoding: this._fields.has(FIELD_OUTPUT_ENCODING) ? asUint(this._fields.get(FIELD_OUTPUT_ENCODING)) : null,
+      };
+    }
   }
 
   _onTextMessage(text) {
@@ -154,6 +195,18 @@ export class Ka9qWebClient extends EventTarget {
       this.dispatchEvent(new CustomEvent("busy", { detail: { reason: text.slice(5).trim() } }));
       return;
     }
-    // S:<ssrc> and other prefixes not yet needed by this UI are ignored.
+    // S:<ssrc> - this session's numeric SSRC, needed to address every
+    // A:/O: audio command at this specific session (PROTOCOL-TEXT.md).
+    // Distinct from the outbound raw "S:"/"S:STOP" spectrum commands -
+    // same letter, unrelated: this one is inbound, with a numeric arg.
+    if (args[0] === "S" && args.length > 1 && args[1] !== "") {
+      const ssrc = parseInt(args[1], 10);
+      if (Number.isFinite(ssrc)) {
+        this.ssrc = ssrc;
+        this.dispatchEvent(new CustomEvent("ssrc", { detail: { ssrc } }));
+      }
+      return;
+    }
+    // Other prefixes not yet needed by this UI are ignored.
   }
 }

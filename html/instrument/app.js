@@ -14,6 +14,7 @@ import { createSpectrumDisplay } from "./spectrum-canvas.js";
 import { absoluteCenterHz } from "./spectrum-decode.js";
 import { loadNotes, saveNotes } from "./notes.js";
 import { spectrumToCsv } from "./spectrum-export.js";
+import { createAudioPlayer } from "./audio.js";
 
 const $ = (id) => document.getElementById(id);
 let currentFreqHz = null;
@@ -53,6 +54,45 @@ createValuePanel($("sgm-meter"), (panel, close) => {
     </div>`;
   panel.querySelector("#ck-analog").addEventListener("change", (e) => {
     meter.setStyle(e.target.checked ? "analog" : "bar");
+  });
+});
+
+// ---- Audio segment ----
+const audioPlayer = createAudioPlayer(client);
+let lastVolumeSlider = "1";
+
+function renderAudioState() {
+  $("audio-state").textContent = !audioPlayer.isPlaying() ? "Off" : (audioPlayer.isRecording() ? "Rec" : "On");
+}
+renderAudioState();
+
+createValuePanel($("sgm-audio"), (panel, close) => {
+  panel.innerHTML = `
+    <div class="pop-head"><span>Audio</span><span></span></div>
+    <div class="pop-body">
+      <button class="k" id="audio-toggle">${audioPlayer.isPlaying() ? "Stop audio" : "Start audio"}</button>
+      <label class="chk"><input type="checkbox" id="audio-pcm" ${audioPlayer.isPcm() ? "checked" : ""}> PCM (uncheck for Opus)</label>
+      <div class="prow"><span class="cap" style="min-width:52px">Volume</span><input type="range" id="audio-volume" min="0" max="1" step="0.01" value="${lastVolumeSlider}"></div>
+      <button class="k mini" id="audio-record" ${audioPlayer.isPlaying() ? "" : "disabled"}>${audioPlayer.isRecording() ? "Stop recording" : "Record"}</button>
+    </div>`;
+  panel.querySelector("#audio-toggle").addEventListener("click", () => {
+    if (audioPlayer.isPlaying()) audioPlayer.stop();
+    else audioPlayer.start();
+    renderAudioState();
+    close();
+  });
+  panel.querySelector("#audio-pcm").addEventListener("change", (e) => {
+    audioPlayer.setPcm(e.target.checked);
+  });
+  panel.querySelector("#audio-volume").addEventListener("input", (e) => {
+    lastVolumeSlider = e.target.value;
+    audioPlayer.setVolume(Number(e.target.value));
+  });
+  panel.querySelector("#audio-record").addEventListener("click", () => {
+    const freqKhz = currentFreqHz !== null ? currentFreqHz / 1000 : 0;
+    audioPlayer.toggleRecording(freqKhz, client.mode || "unknown");
+    renderAudioState();
+    close();
   });
 });
 

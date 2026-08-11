@@ -283,3 +283,72 @@ arrives - see its init a few hundred lines up) - casting NaN to
 fix hit exactly that, which is what actually produced a genuine
 `000000000` freeze during testing. Guarded with `!isnan(...)` alongside
 the existing `Frontend.samprate > 0` check.
+
+## Audio playback (2026-08-11)
+
+Ported the stock UI's entire audio pipeline - the single largest gap in
+the parity manifest (4 of 43 features). Wire protocol and client
+architecture researched from `html/radio.js`/`html/pcm-player.js`/
+`html/opus-decoder.min.js` before writing anything, since audio's wire
+behaviour has real, non-obvious differences from spectrum/channel data
+already documented elsewhere in this fork:
+
+- Audio, Channel Data (0x7E), and Spectrum Data (0x7F) all share the same
+  RTP-style header; audio has no fixed payload shape of its own - the RTP
+  **payload-type byte** carries the codec (`0x6F` = Opus, 48kHz mono) and,
+  for PCM, the sample rate/channel combination (`0x70`-`0x7D`, per
+  `audio-decode.js`'s `PCM_PT_HINTS`, ported from `radio.js`'s own table).
+  New `html/instrument/audio-decode.js`, covered by
+  `tests/js/audio-decode.test.mjs`.
+- Unlike spectrum's raw `S:`/`S:STOP`, audio commands (`O:PCM`/`O:OPUS`/
+  `A:START`/`A:STOP`) are wrapped in the normal `C:<clientId>:<seq>:`
+  envelope, and every one needs this session's numeric SSRC - which
+  arrives as its own inbound `S:<ssrc>` text message (same letter as the
+  outbound raw spectrum command, unrelated context) that this UI's
+  `ws-client.js` previously ignored entirely. Added SSRC capture plus
+  `setAudioEncoding()`/`startAudio()`/`stopAudio()` to `Ka9qWebClient`,
+  covered by new tests in `tests/js/ws-client.test.mjs`.
+- Start sequence is order-sensitive: select encoding (`O:PCM`/`O:OPUS`)
+  *then* `A:START`. Stop is also order-sensitive the other way: `A:STOP`
+  *then* re-send the encoding selector, to keep the backend's per-session
+  encoding state aligned even while audio is stopped. Toggling PCM<->Opus
+  **while already playing** is neither of those - ported from
+  `radio.js`'s `onPcmCheckboxChange()`, it's a single `O:PCM`/`O:OPUS`
+  command with no `A:START`/`A:STOP` touched at all, confirmed by reading
+  that exact handler after an initial (wrong) assumption that it did a
+  full stop/restart cycle - caught by a failing test before it ever
+  shipped, not by manual testing.
+- PCM sample rate/channel count must come from the backend's own
+  `OUTPUT_SAMPRATE`(20)/`OUTPUT_CHANNELS`(49) Channel Data TLV fields
+  (added to `status-decode.js`, tracked as `client.audioOutput` in
+  `ws-client.js`), never guessed from mode - stock's own code comment
+  warns stereo modes like ISB/user1 need the real backend-reported
+  layout, not a GUI-mode guess.
+- The actual playback/decode engines are **reused, not reimplemented**:
+  `html/pcm-player.js` (raw S16BE PCM -> `AudioContext`, `PCMPlayer`
+  global) and the vendored `html/opus-decoder.min.js` (WASM Opus decoder,
+  `window["opus-decoder"].OpusDecoder`) are loaded as plain classic
+  `<script>` tags by `html/instrument/index.html` (same files the stock
+  page already uses, referenced via `../` since `html/instrument/` is a
+  subdirectory) - no duplicate/parallel audio-decoding code exists in
+  this fork now.
+- New `html/instrument/audio.js` (`createAudioPlayer(client)`) is the
+  glue: PCM/Opus player lifecycle, the volume curve (perceptual `x^2.5`
+  into an over-unity `[0,4]` gain range, ported exactly from
+  `radio.js`'s `setPlayerVolume()` - a plain linear gain would sound
+  quieter than stock), and recording (delegates to `PCMPlayer`'s own
+  `startRecording()`/`stopRecording()`, which capture already-decoded
+  audio via `MediaRecorder` + re-encode to `.wav` on stop - no server
+  involvement, exactly matching stock). Covered by
+  `tests/js/audio.test.mjs` using fake `PCMPlayer`/`OpusDecoder`
+  globals (no real `AudioContext`/WASM in the test run) - command
+  *sequencing* (what gets sent, in what order, under what state) is what
+  these tests verify, not real audio output, which was checked live
+  after deploying (see the parity manifest's `audio-toggle`/
+  `audio-volume`/`audio-pcm`/`audio-record` entries).
+- UI: new `#sgm-audio` segment in the instrument bar (matches the
+  existing segment+popover pattern used by Mode/Meter/Band/etc.) with
+  Start/Stop, a PCM/Opus checkbox, a volume slider, and a Record button
+  that's disabled until audio is actually playing (mirrors stock's own
+  "please start audio before recording" guard, but as a disabled state
+  rather than an alert dialog).
