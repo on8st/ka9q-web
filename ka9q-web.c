@@ -143,6 +143,13 @@ struct session {
   double noise_density_audio;
   double if_power;
   int zoom_index;
+  /* True once spectrum_thread's retroactive default-view correction (see
+     its body) has run for this session, whether or not it actually changed
+     anything. A session created before Frontend ever populated (the very
+     first connection right after a restart) gets stuck with the plain HF
+     defaults below at creation time; this flag makes that correction a
+     one-shot retry once real Frontend data exists, instead of never. */
+  bool default_view_retro_checked;
   char requested_preset[32];
   double bins_min_db;
   double bins_max_db;
@@ -3257,6 +3264,57 @@ void *spectrum_thread(void *arg) {
      decoded BIN_DATA/BIN_BYTE_DATA TLV. */
   unsigned long last_seen_real = Real_spectrum_packets;
   while(sp->spectrum_active) {
+    /* Retroactive default-view correction: if this session was created
+       before Frontend ever populated (samprate/frequency still 0/NAN at
+       that time - see the detailed comment at session creation), its
+       tuned frequency/spectrum centre/zoom were left at plain HF defaults
+       that are outside VHF/UHF's receivable range. That correction only
+       ran once, at creation, so it never got retried once real Frontend
+       data showed up. Check the flag unlocked first (cheap, and false
+       forever after the first successful pass, so this degrades to a
+       single bool read for the rest of the session's life); only take
+       session_mutex - which every other Frontend/session mutation in this
+       file already holds while touching these same fields - when there is
+       actually a chance of work to do. */
+    if (!sp->default_view_retro_checked && Frontend.samprate > 0 && !isnan(Frontend.frequency)) {
+      pthread_mutex_lock(&session_mutex);
+      if (!sp->default_view_retro_checked) {
+        sp->default_view_retro_checked = true;
+        /* Never overwrite a frequency/view the user has since chosen for
+           themselves - only fix up a session that's still sitting on the
+           untouched creation-time defaults. */
+        if (sp->last_client_command_ms == 0) {
+          double lo_if, hi_if;
+          frontend_if_bounds(&lo_if, &hi_if);
+          int64_t const lo_bound = (int64_t)round(Frontend.frequency + lo_if);
+          int64_t const hi_bound = (int64_t)round(Frontend.frequency + hi_if);
+          bool retuned = false;
+          if (hi_bound > lo_bound && (sp->frequency < lo_bound || sp->frequency > hi_bound)) {
+            sp->frequency = (uint32_t)round((lo_bound + hi_bound) / 2.0);
+            retuned = true;
+          }
+          if (sp->center_frequency == 0) {
+            sp->center_frequency = (uint32_t)round(Frontend.frequency + (lo_if + hi_if) / 2.0);
+            const int table_size = sizeof(zoom_table) / sizeof(zoom_table[0]);
+            int level = 0;
+            for(; level < table_size; level++)
+              if(zoom_table[level].bin_width * zoom_table[level].bin_count <= round(hi_if - lo_if))
+                break;
+            if (level >= table_size)
+              level = table_size - 1;
+            sp->zoom_index = level;
+            sp->bins = zoom_table[level].bin_count;
+            sp->bin_width = zoom_table[level].bin_width;
+          }
+          if (retuned) {
+            char freq_msg[64];
+            snprintf(freq_msg, sizeof(freq_msg), "%.3f", sp->frequency * 0.001);
+            control_set_frequency(sp, freq_msg);
+          }
+        }
+      }
+      pthread_mutex_unlock(&session_mutex);
+    }
     int const demod = preferred_spectrum_demod();
     /* Poke, omnisdr-style (docs/INVENTORY.md's "orphan reaper" entry):
        unconditionally re-assert the full channel spec every cycle rather
