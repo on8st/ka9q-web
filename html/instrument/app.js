@@ -269,10 +269,27 @@ createValuePanel($("sgm-band"), (panel, close) => {
   panel.innerHTML = `
     <div class="pop-head"><span>Band</span><span>coverage ${fmtMHz(currentCoverage.lowHz)}–${fmtMHz(currentCoverage.highHz)} MHz</span></div>
     <div class="pop-body">
-      <div class="chips" id="band-cats">${cats.map((c) => `<span class="chip${c === bandCategory ? " on" : ""}" data-cat="${c}">${c}</span>`).join("")}</div>
+      <div class="chips" id="band-cats">
+        <span class="chip" data-full="1" title="Zoom out to this receiver's entire coverage">Full</span>
+        ${cats.map((c) => `<span class="chip${c === bandCategory ? " on" : ""}" data-cat="${c}">${c}</span>`).join("")}
+      </div>
       <div class="chips g4" id="band-chips">${bands.map((b) => `<span class="chip" data-freq="${b.freq}">${b.label}</span>`).join("")}</div>
     </div>`;
   panel.querySelector("#band-cats").addEventListener("click", (e) => {
+    if (e.target.dataset.full) {
+      // "Full" isn't a named band - it's a reset-the-view action: widest
+      // zoom-table entry (index 0, same convention as the drawer's zoom
+      // slider) centred on the receiver's actual coverage midpoint. That
+      // midpoint deliberately isn't inside any HAM_BAND_EDGES entry for a
+      // wideband front end (HF), so the BAND segment's existing "FULL
+      // BAND" fallback label (tunedFreq handler, bandForFrequency() ->
+      // null) picks it up for free once the server echoes the retune.
+      client.setZoomLevel(0);
+      const center = Math.round((currentCoverage.lowHz + currentCoverage.highHz) / 2);
+      client.tune(center);
+      close();
+      return;
+    }
     const cat = e.target.dataset.cat;
     if (!cat) return;
     bandCategory = cat;
