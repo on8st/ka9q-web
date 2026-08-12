@@ -280,11 +280,41 @@ export function measureAutoscaleRange(binsDb) {
   };
 }
 
-// How fast the autorange floor/ceiling adapts to the real incoming data
-// (0 = never moves, 1 = snaps instantly to the latest frame). Smoothed
-// rather than snapping so the display doesn't flicker frame to frame.
-const AUTORANGE_SMOOTHING = 0.15;
-const AUTORANGE_PADDING_DB = 4;
+// Autorange, ported from omnisdr's AutoRange (on8st/omnisdr,
+// src/shared/db-range.js) - operator-confirmed live to have none of the
+// flicker/staleness problems this UI's own continuous per-frame EMA
+// caused (three straight follow-up fixes chasing it - see git log for
+// fix-2-followup2/3/4 - each one a symptom of the same root cause: the
+// displayed range moving a little on literally every frame). Two changes
+// from the old design:
+//   - the floor tracks a low PERCENTILE of the current bins (robust
+//     against a single noise spike pulling the true minimum down),
+//     capped to a span between AUTORANGE_MIN_SPAN_DB and
+//     AUTORANGE_MAX_SPAN_DB above the floor, rather than the literal
+//     min/max of the frame;
+//   - the smoothed result only COMMITS - becomes what currentRange()
+//     actually returns - once every AUTORANGE_COMMIT_INTERVAL_MS,
+//     snapped to a coarse dB grid, instead of drifting every single
+//     frame. This is the actual fix: a waterfall row painted under a
+//     range that's stable for seconds at a time never needs revisiting
+//     later, which is why the offscreen waterfall canvas below needs no
+//     recolor-on-drift or periodic-repaint machinery at all - the old
+//     design's entire reason for existing goes away with a range that
+//     doesn't constantly move.
+const AUTORANGE_ALPHA = 0.15;
+const AUTORANGE_FLOOR_PCT = 0.25;
+const AUTORANGE_MIN_SPAN_DB = 25;
+const AUTORANGE_MAX_SPAN_DB = 70;
+const AUTORANGE_MARGIN_DB = 6;
+const AUTORANGE_COMMIT_INTERVAL_MS = 3000;
+const AUTORANGE_SNAP_DB = 2;
+
+function percentileDb(binsDb, p) {
+  if (!binsDb || binsDb.length === 0) return 0;
+  const sorted = Float32Array.from(binsDb).sort(); // TypedArray sort() is numeric by default
+  const idx = Math.min(sorted.length - 1, Math.max(0, Math.round(p * (sorted.length - 1))));
+  return sorted[idx];
+}
 
 export function createSpectrumDisplay(container, { onTune } = {}) {
   container.innerHTML = "";
@@ -336,74 +366,43 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   let colorIndex = loadColorIndex();
 
   // Raw per-row bin data (Float32Array), front = newest, one entry per
-  // real frame received - kept so the WHOLE visible waterfall can be
-  // recoloured against the current range on every draw(), not just
-  // whatever row is newest. Previously each row's colour was computed
-  // once, at draw time, then only ever scrolled (a cheap canvas self-
-  // copy) - correct as long as the range never changed, but any real
-  // shift in the range left a permanent, frozen seam in the already-
-  // drawn history: everything before the shift stayed the OLD colour
-  // forever, since nothing ever revisited it. Confirmed live as the
-  // "waterfall goes dark a couple of rows down and stays that way"
-  // report (2026-08-12) - a hard, unmoving boundary in the history is
-  // exactly what baking colour in once, permanently, produces. Capped
-  // well above any realistic panel height so memory stays bounded
-  // regardless of how tall the waterfall is resized to.
+  // real frame received. Only used for the RARE bulk-repaint path below
+  // (resize, span change, or an explicit color-setting change) - not for
+  // per-frame painting any more (see wfCanvas). Capped well above any
+  // realistic panel height so memory stays bounded regardless of how
+  // tall the waterfall is resized to.
   let waterfallHistory = [];
   const WATERFALL_HISTORY_MAX = 4096;
   let lastSpanKey = null; // `${centerHz}|${binWidthHz}|${binCount}` of the frame history was captured under
 
-  // A full recolor-from-history pass costs O(width x visible rows) - fine
-  // occasionally, not fine every single frame (reported live: the browser
-  // got sluggish, worse the taller the waterfall panel, exactly the
-  // signature of doing this unconditionally on every draw() call, which
-  // the first version of this fix did). Instead: the common case (a new
-  // row arriving, range drifting by the usual small per-frame smoothing
-  // amount) uses the original cheap approach - scroll existing pixels,
-  // paint just the new row - and a full recolor only runs when something
-  // that actually invalidates the existing pixels happens: the panel's
-  // layout changed (resize, spectrum/waterfall split moved - the exact
-  // mechanism issue 8's bug lived in), a color-affecting setting changed
-  // directly (bias/colormap/manual range - forceFullRecolorNext), the
-  // autorange range has drifted enough to matter, or a long backstop
-  // interval has elapsed regardless (belt-and-braces against any drift
-  // path this doesn't otherwise catch).
-  //
-  // The range check is drift-based (RANGE_DRIFT_RECOLOR_DB), not purely
-  // a short wall-clock timer - an earlier version used a flat 500ms
-  // period, which turned out shorter than this station's real spectrum
-  // frame interval (~1s), so it ended up doing a full recolor on
-  // essentially every frame anyway: still correct, but it defeated the
-  // fast path entirely and its cost (computed inline with the trace, in
-  // the same synchronous draw() call) showed up live as flicker in the
-  // waterfall's newest rows and brief stutter in the spectrum trace
-  // above it (reported live). AUTORANGE_SMOOTHING means minDb/maxDb
-  // wobble a little every real frame regardless - recoloring on every
-  // wobble would be just as bad, so only a drift past a perceptible
-  // threshold (half AUTORANGE_PADDING_DB) triggers one early.
-  let lastWfTop = null;
-  let lastWfH = null;
-  let lastFullRecolorAt = 0;
-  let lastRecoloredMinDb = null;
-  let lastRecoloredMaxDb = null;
-  const RANGE_DRIFT_RECOLOR_DB = AUTORANGE_PADDING_DB / 2;
-  const FULL_RECOLOR_INTERVAL_MS = 4000; // long backstop, not the routine trigger
-  let forceFullRecolorNext = true; // first draw always does a full paint
-
-  // draw() is called far more often than real spectrum frames arrive -
-  // cursor hover, tuned-frequency/filter-edge echoes, trace-visibility
-  // toggles etc. all call it too. The fast path must only scroll+paint
-  // when a genuinely new row was unshifted onto waterfallHistory since
-  // the last draw(); otherwise it re-paints waterfallHistory[0] (the
-  // SAME row) on every unrelated redraw, walking the waterfall an extra
-  // pixel each time with no new data behind it - then the periodic full
-  // recolor snaps it back to the real history, which reads as the
-  // waterfall drifting forward and then rolling back a couple of lines
-  // on a fixed cadence (confirmed live, matches FULL_RECOLOR_INTERVAL_MS
-  // exactly). waterfallSeq is bumped only in render() when a row is
-  // actually unshifted.
-  let waterfallSeq = 0;
-  let lastDrawnWfSeq = -1;
+  // Waterfall rendering - ported from omnisdr's Pane (on8st/omnisdr,
+  // public/pane.js: this.wf/this.wfx), which the operator confirmed live
+  // has none of the flicker/rollback/stutter bugs three straight rounds
+  // of a putImageData-history-array design produced here (git log
+  // fix-2-followup2/3/4 for the full history of what went wrong each
+  // time). The core idea: a persistent OFFSCREEN canvas holds the
+  // waterfall's pixel history directly - the already-scrolled/painted
+  // pixels themselves ARE the history, there's no separate raw-data
+  // recolor pass in the common case. draw() only ever READS wfCanvas (a
+  // cheap, side-effect-free blit onto the main canvas); every WRITE
+  // happens exactly once per real frame, in render() - never in draw() -
+  // so there is no way for an unrelated redraw (cursor hover, tuned-freq
+  // echo, a trace-visibility toggle, ...) to scroll it, which is what
+  // caused the rollback bug. And because AUTORANGE_COMMIT_INTERVAL_MS
+  // above means the color range is now stable for seconds at a time
+  // instead of drifting every frame, a row painted once rarely needs
+  // revisiting - no timer/threshold-based recolor-on-drift machinery is
+  // needed at all, which is what caused the flicker/stutter bug.
+  const wfCanvas = document.createElement("canvas");
+  const wfCtx = wfCanvas.getContext("2d");
+  // Set whenever something invalidates already-painted pixels outright:
+  // a resize/layout change (wfCanvas gets resized, which clears it - the
+  // same "blank, fills back in" behaviour issue 8's fix relied on), a
+  // span change (old rows are scoped to a frequency range that no longer
+  // applies), or the operator directly changing a color-affecting
+  // setting (bias/colormap/manual range) and expecting the WHOLE
+  // waterfall to reflect it immediately, not just new rows from now on.
+  let wfNeedsRepaint = true; // first draw always does a real paint
 
   function setSpectrumPercent(pct) {
     spectrumPercent = clampSpectrumPercent(pct);
@@ -415,7 +414,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     waterfallBias = Number(bias);
     if (!Number.isFinite(waterfallBias)) waterfallBias = WATERFALL_BIAS_DEFAULT;
     localStorage.setItem(WATERFALL_BIAS_KEY, String(waterfallBias));
-    forceFullRecolorNext = true;
+    wfNeedsRepaint = true;
     if (!paused) draw();
   }
 
@@ -423,7 +422,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     if (!Number.isInteger(idx) || idx < 0 || idx >= COLORMAP_NAMES.length) return;
     colorIndex = idx;
     localStorage.setItem(COLORMAP_INDEX_KEY, String(colorIndex));
-    forceFullRecolorNext = true;
+    wfNeedsRepaint = true;
     if (!paused) draw();
   }
 
@@ -434,6 +433,14 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     const denom = maxDb - wfMinDb;
     const scaled = denom !== 0 ? (db - wfMinDb) / denom : 0;
     return pickColormapColor(cmap, scaled);
+  }
+
+  // CSS-string form for wfCanvas's fillStyle (the per-frame fast path
+  // below, ported from omnisdr's Pane#draw, paints via fillRect + a CSS
+  // color rather than raw ImageData pixel writes).
+  function waterfallColorCss(db, minDb, maxDb) {
+    const [r, g, b] = waterfallColor(db, minDb, maxDb);
+    return `rgb(${r},${g},${b})`;
   }
 
   // "FFT averaging amount" - client-side EMA, applied before the trace/
@@ -542,31 +549,44 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     return binsAverage;
   }
 
+  // rawFloorEma/rawTopEma hold the EMA'd PRE-margin/PRE-snap values so
+  // each commit's smoothing step is against the true previous estimate,
+  // not the already-padded/snapped display value - otherwise the margin
+  // and snap rounding would compound into the EMA on every commit.
+  let rawFloorEma = null;
+  let rawTopEma = null;
+  let lastAutorangeCommitAt = 0;
+
   function updateAutorange(binsDb) {
-    let min = Infinity;
-    let max = -Infinity;
-    for (let i = 0; i < binsDb.length; i++) {
-      if (binsDb[i] < min) min = binsDb[i];
-      if (binsDb[i] > max) max = binsDb[i];
-    }
-    if (smoothMinDb === null) {
-      smoothMinDb = min;
-      smoothMaxDb = max;
-    } else {
-      smoothMinDb += (min - smoothMinDb) * AUTORANGE_SMOOTHING;
-      smoothMaxDb += (max - smoothMaxDb) * AUTORANGE_SMOOTHING;
-    }
+    const now = Date.now();
+    if (smoothMinDb !== null && now - lastAutorangeCommitAt < AUTORANGE_COMMIT_INTERVAL_MS) return;
+    lastAutorangeCommitAt = now;
+
+    const floor = percentileDb(binsDb, AUTORANGE_FLOOR_PCT);
+    let peak = -Infinity;
+    for (let i = 0; i < binsDb.length; i++) if (binsDb[i] > peak) peak = binsDb[i];
+    // Top tracks the peak but is capped so a strong signal can't bloom
+    // the scale, and is kept at least AUTORANGE_MIN_SPAN_DB above the
+    // floor so weak signals stay visible.
+    let top = Math.min(peak + 3, floor + AUTORANGE_MAX_SPAN_DB);
+    top = Math.max(top, floor + AUTORANGE_MIN_SPAN_DB);
+
+    rawFloorEma = rawFloorEma === null ? floor : rawFloorEma + AUTORANGE_ALPHA * (floor - rawFloorEma);
+    rawTopEma = rawTopEma === null ? top : rawTopEma + AUTORANGE_ALPHA * (top - rawTopEma);
+
+    smoothMinDb = Math.round((rawFloorEma - AUTORANGE_MARGIN_DB) / AUTORANGE_SNAP_DB) * AUTORANGE_SNAP_DB;
+    smoothMaxDb = Math.round(rawTopEma / AUTORANGE_SNAP_DB) * AUTORANGE_SNAP_DB;
   }
 
   function currentRange() {
     if (manualRange) return manualRange;
     if (smoothMinDb === null) return { minDb: -100, maxDb: -20 };
-    return { minDb: smoothMinDb - AUTORANGE_PADDING_DB, maxDb: smoothMaxDb + AUTORANGE_PADDING_DB };
+    return { minDb: smoothMinDb, maxDb: smoothMaxDb };
   }
 
   function setRangeInternal(minDb, maxDb) {
     manualRange = { minDb, maxDb };
-    forceFullRecolorNext = true;
+    wfNeedsRepaint = true;
     if (!paused) draw();
   }
 
@@ -605,6 +625,81 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     if (maxDb - minDb > 10) setRangeInternal(minDb, maxDb - 5);
   }
 
+  /** (Re)paints the WHOLE offscreen waterfall canvas from waterfallHistory
+   * against the given range - the bulk, occasional path (resize, span
+   * change, or an explicit color-setting change), not the per-frame one.
+   * Bulk raw-pixel writes (createImageData/putImageData) are the right
+   * tool here, unlike for the single-row fast path below - cost is
+   * O(width x height), but this only ever runs on a deliberate, rare
+   * trigger (wfNeedsRepaint), never per frame. */
+  function repaintWaterfallFromHistory(w, wfH, minDb, maxDb) {
+    if (w < 1 || wfH < 1) return;
+    const img = wfCtx.createImageData(w, wfH);
+    for (let rowIdx = 0; rowIdx < wfH; rowIdx++) {
+      const rowOffset = rowIdx * w * 4;
+      const rowBins = rowIdx < waterfallHistory.length ? waterfallHistory[rowIdx] : null;
+      if (rowBins) {
+        const rowBinCount = rowBins.length;
+        for (let x = 0; x < w; x++) {
+          const db = rowBins[binIndexForPixel(x, w, rowBinCount)];
+          const [r, g, b] = waterfallColor(db, minDb, maxDb);
+          const i = rowOffset + x * 4;
+          img.data[i] = r;
+          img.data[i + 1] = g;
+          img.data[i + 2] = b;
+          img.data[i + 3] = 255;
+        }
+      } else {
+        // No history yet for this row (panel taller than what's been
+        // captured so far - e.g. right after a resize or fresh page
+        // load). putImageData writes alpha literally rather than
+        // compositing, so leaving this transparent would reveal
+        // whatever's behind the canvas instead of a deliberate blank
+        // row - paint the same background colour the trace region uses.
+        for (let x = 0; x < w; x++) {
+          const i = rowOffset + x * 4;
+          img.data[i] = 4; img.data[i + 1] = 6; img.data[i + 2] = 10; img.data[i + 3] = 255;
+        }
+      }
+    }
+    wfCtx.putImageData(img, 0, 0);
+  }
+
+  /** Ensures wfCanvas matches the panel's current (w, wfH) and is up to
+   * date, repainting from history when its size just changed or
+   * wfNeedsRepaint was set. Cheap no-op otherwise - safe to call every
+   * draw(). */
+  function ensureWaterfallCanvas(w, wfH, minDb, maxDb) {
+    const sizeChanged = wfCanvas.width !== w || wfCanvas.height !== wfH;
+    if (sizeChanged) {
+      wfCanvas.width = w; // resizing a canvas clears it - the same
+      wfCanvas.height = wfH; // "blank, fills back in" behaviour issue 8 relied on
+    }
+    if (sizeChanged || wfNeedsRepaint) {
+      repaintWaterfallFromHistory(w, wfH, minDb, maxDb);
+      wfNeedsRepaint = false;
+    }
+  }
+
+  /** Scrolls the offscreen waterfall canvas down 1px and paints the
+   * newest row on top - the fast, common-case path, ported directly from
+   * omnisdr's Pane#draw (public/pane.js): a native canvas self-copy plus
+   * one fillRect per column, no ImageData allocation at all. Called
+   * exactly once per real frame, from render() - never from draw() - so
+   * there is no way for an unrelated redraw to trigger an extra scroll
+   * (the root cause of the rollback bug the old design had). */
+  function scrollWaterfallAndAppendRow(rowBins, minDb, maxDb) {
+    const w = wfCanvas.width, wfH = wfCanvas.height;
+    if (w < 1 || wfH < 1) return;
+    if (wfH > 1) wfCtx.drawImage(wfCanvas, 0, 1);
+    const rowBinCount = rowBins.length;
+    for (let x = 0; x < w; x++) {
+      const db = rowBins[binIndexForPixel(x, w, rowBinCount)];
+      wfCtx.fillStyle = waterfallColorCss(db, minDb, maxDb);
+      wfCtx.fillRect(x, 0, 1, 1);
+    }
+  }
+
   function draw() {
     if (!lastSpectrum) return;
     const { centerHz, binWidthHz, binCount } = lastSpectrum;
@@ -617,89 +712,19 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     const { minDb, maxDb } = currentRange();
 
     // Only the trace region needs an explicit clear - the waterfall
-    // region below it always has every pixel overwritten one way or the
-    // other every call (see below), whether that's the fast path's
-    // single new row + scroll, or a full repaint.
+    // region below it is a straight blit of wfCanvas (see below), which
+    // always covers every pixel there.
     ctx.fillStyle = "#04060A";
     ctx.fillRect(0, 0, w, splitY);
 
-    // Waterfall: two paths, chosen per call - see the state declared
-    // with waterfallHistory/FULL_RECOLOR_INTERVAL_MS above for the full
-    // reasoning. Fast path (the common case, every frame): scroll
-    // existing pixels down 1px, paint only the newest row - O(width).
-    // Full recolor (occasional): repaint every visible row from stored
-    // history against the current range - O(width x height), only run
-    // when the layout just changed, a color-affecting setting just
-    // changed directly, the range has drifted past RANGE_DRIFT_RECOLOR_DB
-    // since the last full recolor, or the long backstop interval elapsed.
+    // Waterfall: draw() only ever READS wfCanvas - a cheap, side-effect-
+    // free blit. All mutation (scrolling, painting new rows) happens in
+    // render(), see scrollWaterfallAndAppendRow()'s own comment for why.
     const wfTop = Math.floor(splitY);
     const wfH = Math.floor(h - splitY);
     if (wfH > 0) {
-      const now = Date.now();
-      const layoutChanged = wfTop !== lastWfTop || wfH !== lastWfH;
-      const rangeDrifted = lastRecoloredMinDb === null ||
-        Math.abs(minDb - lastRecoloredMinDb) >= RANGE_DRIFT_RECOLOR_DB ||
-        Math.abs(maxDb - lastRecoloredMaxDb) >= RANGE_DRIFT_RECOLOR_DB;
-      const periodicDue = now - lastFullRecolorAt >= FULL_RECOLOR_INTERVAL_MS;
-      const doFullRecolor = layoutChanged || rangeDrifted || periodicDue || forceFullRecolorNext;
-
-      if (doFullRecolor) {
-        const img = ctx.createImageData(w, wfH);
-        for (let rowIdx = 0; rowIdx < wfH; rowIdx++) {
-          const rowOffset = rowIdx * w * 4;
-          const rowBins = rowIdx < waterfallHistory.length ? waterfallHistory[rowIdx] : null;
-          if (rowBins) {
-            const rowBinCount = rowBins.length;
-            for (let x = 0; x < w; x++) {
-              const db = rowBins[binIndexForPixel(x, w, rowBinCount)];
-              const [r, g, b] = waterfallColor(db, minDb, maxDb);
-              const i = rowOffset + x * 4;
-              img.data[i] = r;
-              img.data[i + 1] = g;
-              img.data[i + 2] = b;
-              img.data[i + 3] = 255;
-            }
-          } else {
-            // No history yet for this row (panel taller than what's been
-            // captured so far - e.g. right after a resize or fresh page
-            // load). putImageData writes alpha literally rather than
-            // compositing, so leaving this transparent would reveal
-            // whatever's behind the canvas instead of a deliberate blank
-            // row - paint the same background colour the trace region uses.
-            for (let x = 0; x < w; x++) {
-              const i = rowOffset + x * 4;
-              img.data[i] = 4; img.data[i + 1] = 6; img.data[i + 2] = 10; img.data[i + 3] = 255;
-            }
-          }
-        }
-        ctx.putImageData(img, 0, wfTop);
-        lastWfTop = wfTop;
-        lastWfH = wfH;
-        lastFullRecolorAt = now;
-        lastRecoloredMinDb = minDb;
-        lastRecoloredMaxDb = maxDb;
-        forceFullRecolorNext = false;
-        lastDrawnWfSeq = waterfallSeq;
-      } else if (waterfallSeq !== lastDrawnWfSeq && waterfallHistory.length > 0) {
-        if (wfH > 1) {
-          ctx.drawImage(canvas, 0, wfTop, w, wfH - 1, 0, wfTop + 1, w, wfH - 1);
-        }
-        const row = ctx.createImageData(w, 1);
-        const rowBins = waterfallHistory[0];
-        const rowBinCount = rowBins.length;
-        for (let x = 0; x < w; x++) {
-          const db = rowBins[binIndexForPixel(x, w, rowBinCount)];
-          const [r, g, b] = waterfallColor(db, minDb, maxDb);
-          row.data[x * 4] = r;
-          row.data[x * 4 + 1] = g;
-          row.data[x * 4 + 2] = b;
-          row.data[x * 4 + 3] = 255;
-        }
-        ctx.putImageData(row, 0, wfTop);
-        lastDrawnWfSeq = waterfallSeq;
-      }
-      // else: no new row and nothing invalidated - waterfall pixels are
-      // already correct, leave them untouched.
+      ensureWaterfallCanvas(w, wfH, minDb, maxDb);
+      ctx.drawImage(wfCanvas, 0, wfTop);
     }
 
     // Trace, filled below the line (matches the mockup's phosphor-green
@@ -913,17 +938,27 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
         if (spanKey !== lastSpanKey) {
           waterfallHistory.length = 0;
           lastSpanKey = spanKey;
+          wfNeedsRepaint = true; // old wfCanvas pixels are scoped to the old span - blank it, don't wait for them to scroll out
         }
         waterfallHistory.unshift(Float32Array.from(rowBins));
         if (waterfallHistory.length > WATERFALL_HISTORY_MAX) waterfallHistory.length = WATERFALL_HISTORY_MAX;
-        waterfallSeq++;
+        // Paint the new row directly here, once, right where it's known
+        // to be genuinely new - not inside draw(), which runs far more
+        // often than real frames arrive (cursor hover, tuned-freq echoes,
+        // trace-visibility toggles...) and previously had to guess
+        // whether a given call represented new data (a fragile sequence-
+        // counter check that still got this wrong under some call
+        // orderings - see git log fix-2-followup3). Structurally
+        // impossible for an unrelated redraw to trigger a scroll now.
+        const { minDb, maxDb } = currentRange();
+        scrollWaterfallAndAppendRow(rowBins, minDb, maxDb);
         draw();
       }
     },
     resize,
     setRange: setRangeInternal,
     getRange: () => currentRange(),
-    clearManualRange: () => { manualRange = null; forceFullRecolorNext = true; },
+    clearManualRange: () => { manualRange = null; wfNeedsRepaint = true; },
     setPaused: (v) => { paused = v; },
     isPaused: () => paused,
     setTunedFreqHz: (hz) => { tunedFreqHz = hz; if (!paused) draw(); },
