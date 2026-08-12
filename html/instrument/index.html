@@ -26,7 +26,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--ui);font-size:13p
 #app{position:relative;width:100vw;height:100vh;display:flex;flex-direction:column}
 #display-area{display:block;flex:1 1 0;min-height:0;width:100%;background:#04060A;cursor:crosshair}
 #display-area canvas{display:block}
-#dockslot{flex:0 0 auto;display:flex;padding:9px 10px;background:var(--panel);border-top:1px solid var(--rule);justify-content:center}
+#dockslot{flex:0 0 auto;display:flex;padding:9px 10px;background:var(--panel);border-top:1px solid var(--rule);justify-content:center;overflow-x:auto;-webkit-overflow-scrolling:touch}
 
 .silk{font-size:9.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
 .glass{
@@ -35,7 +35,7 @@ body{background:var(--ink);color:var(--text);font-family:var(--ui);font-size:13p
   border:1px solid rgba(120,135,154,.22);border-radius:var(--r);
 }
 
-#instrument{display:flex;align-items:stretch;overflow:visible}
+#instrument{display:flex;align-items:stretch;overflow:visible;flex-shrink:0}
 .sgm{
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
   padding:9px 13px 8px;cursor:pointer;position:relative;
@@ -148,6 +148,28 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
 .card textarea.k{width:100%;font-family:var(--ui);resize:vertical}
 
 @media (prefers-reduced-motion:reduce){*{transition:none !important}}
+
+/* Narrow viewports (phones, portrait): the dock's natural width comes
+   almost entirely from the frequency segment's 9-digit odometer at
+   32px/digit - on an iPhone-width screen (~375-430px) that alone is
+   wider than the viewport, before the other six segments are even
+   counted. #dockslot's overflow-x:auto (above) is the safety net so
+   nothing is ever unreachable regardless of viewport size, but the
+   goal here is to avoid needing that scroll in the first place at
+   typical phone widths. */
+@media (max-width:600px){
+  .sgm{padding:6px 8px 6px;gap:2px}
+  .sgm .cap{font-size:7.5px}
+  .sgm .val{font-size:12.5px}
+  .sgm.freq{padding:4px 6px}
+  .digits .d .num{font-size:20px}
+  .digits .sep{font-size:20px}
+  .digits .unit{font-size:7.5px;padding-left:4px}
+  .spin{margin-left:7px}
+  .spin .sval{font-size:9.5px;padding:2px 5px;min-width:44px}
+  .spin .sar{height:12px}
+  #dockslot{padding:6px 4px}
+}
 </style>
 </head>
 <body>
