@@ -97,8 +97,39 @@ export function pixelForHz(hz, width, absCenterHz, binWidthHz, binCount) {
   return x >= 0 && x <= width ? x : null;
 }
 
-function fmtAxisLabel(hz) {
-  return (hz / 1e6).toFixed(3);
+// Gridline step selection - was "8 equally-spaced PIXELS, label whatever
+// frequency happens to land there" (span-derived numbers like 144.393,
+// 144.595... - not round). Chooses a "nice" step (1/2/5 x 10^n Hz)
+// instead, targeting roughly targetCount gridlines across the current
+// span, then gridlines are placed at multiples of THAT step (see
+// draw()'s call site) - pixel position follows from the frequency via
+// pixelForHz(), not the other way around. One adaptive rule for all
+// three receivers rather than per-instance hardcoding: the right step
+// depends on what's actually displayed (a whole VHF/UHF band vs. a
+// zoomed-in few-kHz HF SSB slice), which changes with zoom regardless
+// of which receiver this is - the operator's own stated reasoning for
+// why HF specifically needed "something smart" applies identically to
+// VHF/UHF at any zoom level other than their typical/default one.
+export function niceGridStep(spanHz, targetCount = 6) {
+  if (!Number.isFinite(spanHz) || spanHz <= 0 || !Number.isFinite(targetCount) || targetCount <= 0) return 1;
+  const rawStep = spanHz / targetCount;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const normalized = rawStep / magnitude;
+  const niceNormalized = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return niceNormalized * magnitude;
+}
+
+// Decimal count follows the step size, not a fixed 3 - a 1 MHz step
+// needs none ("144"), a 500 kHz step needs one ("144.5"), a 1 kHz step
+// needs three ("14.238", the old default's precision, still correct at
+// that scale), and a 100 Hz step (a very tight HF SSB zoom) needs four.
+// Always whole multiples of the step, so trailing digits are never
+// arbitrary - every displayed label is exactly representable at this
+// precision by construction.
+export function fmtAxisLabel(hz, stepHz) {
+  const stepMHz = stepHz / 1e6;
+  const decimals = Math.max(0, Math.ceil(-Math.log10(stepMHz)));
+  return (hz / 1e6).toFixed(decimals);
 }
 
 /** Which bin index a given absolute frequency falls in (not clamped to
@@ -672,14 +703,25 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     ctx.strokeStyle = "rgba(42,52,65,0.9)";
     ctx.fillStyle = "#78879A";
     ctx.font = `${9 * dpr}px ui-monospace,monospace`;
-    for (let i = 1; i < 8; i++) {
-      const x = (w / 8) * i;
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, wfTop);
-      ctx.stroke();
-      const hz = hzForPixel(x, w, centerHz, binWidthHz, binCount);
-      ctx.fillText(fmtAxisLabel(hz), x - 16 * dpr, wfTop - 4 * dpr);
+    {
+      const leftHz = hzForPixel(0, w, centerHz, binWidthHz, binCount);
+      const rightHz = hzForPixel(w, w, centerHz, binWidthHz, binCount);
+      // targetCount=9: verified against realistic spans before deploying -
+      // lands exactly on the operator's own two examples at each band's
+      // typical/full-coverage view (VHF ~4.3MHz -> 0.5MHz step, UHF
+      // ~8.8MHz -> 1MHz step), and stays sensible (5-9 gridlines) across
+      // everything from a full HF band down to a 2.8kHz SSB QSO zoom.
+      const step = niceGridStep(rightHz - leftHz, 9);
+      const firstTick = Math.ceil(leftHz / step) * step;
+      for (let hz = firstTick; hz <= rightHz; hz += step) {
+        const x = pixelForHz(hz, w, centerHz, binWidthHz, binCount);
+        if (x === null) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, wfTop);
+        ctx.stroke();
+        ctx.fillText(fmtAxisLabel(hz, step), x - 16 * dpr, wfTop - 4 * dpr);
+      }
     }
 
     // "Show ham band edge markers" - ported from spectrum.js's

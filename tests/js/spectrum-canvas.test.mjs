@@ -8,6 +8,7 @@ import {
   SPECTRUM_PERCENT_DEFAULT, WATERFALL_BIAS_DEFAULT, COLORMAP_DEFAULT_INDEX,
   alphaForAveraging, emaStep, updateHoldValue,
   hzToBinIndex, interpolateDcSpike,
+  niceGridStep, fmtAxisLabel,
 } from "../../html/instrument/spectrum-canvas.js";
 
 // Fake localStorage - a real empty store, not a global shim, since these
@@ -207,4 +208,44 @@ test("interpolateDcSpike returns the input unchanged (not a copy) when the windo
 test("interpolateDcSpike returns the input unchanged for an empty/missing array", () => {
   assert.equal(interpolateDcSpike(null, 5), null);
   assert.equal(interpolateDcSpike(new Float32Array(0), 5).length, 0);
+});
+
+// Gridlines used to be "8 equally-spaced PIXELS, label whatever frequency
+// lands there" - span-derived numbers like 144.393, 144.595, not round
+// ones. niceGridStep()/fmtAxisLabel() replace that with a step snapped to
+// 1/2/5 x 10^n Hz, adaptive to the current span rather than hardcoded per
+// receiver (the right step depends on what's displayed, which changes
+// with zoom regardless of which receiver this is).
+test("niceGridStep lands on the operator's own examples at each band's typical full-coverage view", () => {
+  assert.equal(niceGridStep(4.256e6, 9), 500_000); // VHF 2m (~4.3MHz) -> half MHz
+  assert.equal(niceGridStep(8.8e6, 9), 1_000_000); // UHF 70cm (~8.8MHz) -> whole MHz
+});
+
+test("niceGridStep stays sensible across HF's much wider span range", () => {
+  assert.equal(niceGridStep(30e6, 9), 5_000_000); // a full HF band
+  assert.equal(niceGridStep(350e3, 9), 50_000); // a ~350kHz segment (e.g. 20m)
+  assert.equal(niceGridStep(2_800, 9), 500); // a tight 2.8kHz SSB QSO zoom
+});
+
+test("niceGridStep only ever returns a 1, 2, or 5 x 10^n value", () => {
+  for (const span of [123, 4_567, 89_012, 3.4e6, 56.7e6, 890e6]) {
+    const step = niceGridStep(span, 6);
+    const magnitude = 10 ** Math.floor(Math.log10(step));
+    const normalized = Math.round((step / magnitude) * 1000) / 1000; // guard float error
+    assert.ok([1, 2, 5, 10].includes(normalized), `${step} (span ${span}) normalizes to ${normalized}`);
+  }
+});
+
+test("niceGridStep degrades gracefully on invalid input instead of returning 0/NaN/Infinity", () => {
+  for (const span of [0, -5, NaN, Infinity]) {
+    const step = niceGridStep(span, 9);
+    assert.ok(Number.isFinite(step) && step > 0, `span=${span} produced step=${step}`);
+  }
+});
+
+test("fmtAxisLabel's decimal count exactly represents its step - never trailing/arbitrary digits", () => {
+  assert.equal(fmtAxisLabel(144_000_000, 1_000_000), "144"); // 1MHz step - no decimals needed
+  assert.equal(fmtAxisLabel(144_500_000, 500_000), "144.5"); // 0.5MHz step - one decimal
+  assert.equal(fmtAxisLabel(14_238_000, 1_000), "14.238"); // 1kHz step - three decimals (the old fixed default, still correct at this scale)
+  assert.equal(fmtAxisLabel(14_239_500, 500), "14.2395"); // 500Hz step - four decimals
 });
