@@ -294,6 +294,23 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   let waterfallBias = loadWaterfallBias();
   let colorIndex = loadColorIndex();
 
+  // Raw per-row bin data (Float32Array), front = newest, one entry per
+  // real frame received - kept so the WHOLE visible waterfall can be
+  // recoloured against the current range on every draw(), not just
+  // whatever row is newest. Previously each row's colour was computed
+  // once, at draw time, then only ever scrolled (a cheap canvas self-
+  // copy) - correct as long as the range never changed, but any real
+  // shift in the range left a permanent, frozen seam in the already-
+  // drawn history: everything before the shift stayed the OLD colour
+  // forever, since nothing ever revisited it. Confirmed live as the
+  // "waterfall goes dark a couple of rows down and stays that way"
+  // report (2026-08-12) - a hard, unmoving boundary in the history is
+  // exactly what baking colour in once, permanently, produces. Capped
+  // well above any realistic panel height so memory stays bounded
+  // regardless of how tall the waterfall is resized to.
+  let waterfallHistory = [];
+  const WATERFALL_HISTORY_MAX = 4096;
+
   function setSpectrumPercent(pct) {
     spectrumPercent = clampSpectrumPercent(pct);
     localStorage.setItem(SPECTRUM_PERCENT_KEY, String(spectrumPercent));
@@ -502,34 +519,57 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     const splitY = h * (spectrumPercent / 100);
     const { minDb, maxDb } = currentRange();
 
-    // Only the trace region gets wiped each frame - the waterfall region
-    // below it is never blanket-cleared, only scrolled (see below). An
-    // earlier version cleared the whole canvas here, which wiped out the
-    // waterfall's own history a split second before trying to scroll it -
-    // confirmed live: the trace rendered correctly while the waterfall
-    // stayed permanently black.
+    // Only the trace region needs an explicit clear - the waterfall
+    // region below it is fully repainted every call anyway (see below),
+    // which already overwrites every pixel there.
     ctx.fillStyle = "#04060A";
     ctx.fillRect(0, 0, w, splitY);
 
-    // Waterfall: scroll existing content down 1px, draw the newest row at
-    // the top of the waterfall region (matches the mockup's newest-on-top
-    // convention).
+    // Waterfall: fully repainted from waterfallHistory every draw call -
+    // newest row (index 0) at the top (matches the mockup's newest-on-top
+    // convention) - rather than scrolled-and-appended as baked pixels.
+    // Every visible row is recoloured against the CURRENT range/bias/
+    // colormap on every call, so a range change (however it happens)
+    // shows up consistently across the whole panel immediately, instead
+    // of leaving a permanent seam between rows drawn before vs. after the
+    // change (see waterfallHistory's own declaration for the full story).
+    // Costs more per frame than the old self-copy scroll, but draw() is
+    // only ever called on a real incoming frame or a discrete UI action
+    // (never a requestAnimationFrame loop), so at typical panel sizes and
+    // poll rates this is not a meaningful cost - correctness here matters
+    // more than the saved cycles.
     const wfTop = Math.floor(splitY);
     const wfH = Math.floor(h - splitY);
-    if (wfH > 1) {
-      ctx.drawImage(canvas, 0, wfTop, w, wfH - 1, 0, wfTop + 1, w, wfH - 1);
-    }
     if (wfH > 0) {
-      const row = ctx.createImageData(w, 1);
-      for (let x = 0; x < w; x++) {
-        const db = binsDb[binIndexForPixel(x, w, binCount)];
-        const [r, g, b] = waterfallColor(db, minDb, maxDb);
-        row.data[x * 4] = r;
-        row.data[x * 4 + 1] = g;
-        row.data[x * 4 + 2] = b;
-        row.data[x * 4 + 3] = 255;
+      const img = ctx.createImageData(w, wfH);
+      for (let rowIdx = 0; rowIdx < wfH; rowIdx++) {
+        const rowOffset = rowIdx * w * 4;
+        const rowBins = rowIdx < waterfallHistory.length ? waterfallHistory[rowIdx] : null;
+        if (rowBins) {
+          const rowBinCount = rowBins.length;
+          for (let x = 0; x < w; x++) {
+            const db = rowBins[binIndexForPixel(x, w, rowBinCount)];
+            const [r, g, b] = waterfallColor(db, minDb, maxDb);
+            const i = rowOffset + x * 4;
+            img.data[i] = r;
+            img.data[i + 1] = g;
+            img.data[i + 2] = b;
+            img.data[i + 3] = 255;
+          }
+        } else {
+          // No history yet for this row (panel taller than what's been
+          // captured so far - e.g. right after a resize or fresh page
+          // load). putImageData writes alpha literally rather than
+          // compositing, so leaving this transparent would reveal
+          // whatever's behind the canvas instead of a deliberate blank
+          // row - paint the same background colour the trace region uses.
+          for (let x = 0; x < w; x++) {
+            const i = rowOffset + x * 4;
+            img.data[i] = 4; img.data[i + 1] = 6; img.data[i + 2] = 10; img.data[i + 3] = 255;
+          }
+        }
       }
-      ctx.putImageData(row, 0, wfTop);
+      ctx.putImageData(img, 0, wfTop);
     }
 
     // Trace, filled below the line (matches the mockup's phosphor-green
@@ -682,8 +722,19 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     render: (spectrum) => {
       lastSpectrum = spectrum;
       updateAutorange(spectrum.binsDb);
-      processFrame(spectrum); // once per real frame only - draw() must never re-run this (see its own call sites)
-      if (!paused) draw();
+      const rowBins = processFrame(spectrum); // once per real frame only - draw() must never re-run this (see its own call sites)
+      // Gated on !paused, matching the pre-existing pause semantics: the
+      // waterfall previously only gained a new row as a side effect of
+      // draw() actually running (skipped entirely while paused), so
+      // paused frames were silently dropped for the waterfall rather than
+      // queued up. Pushing unconditionally here would instead accumulate
+      // a backlog and dump it all in at once on unpause - a new
+      // discontinuity this fix shouldn't introduce.
+      if (!paused) {
+        waterfallHistory.unshift(Float32Array.from(rowBins));
+        if (waterfallHistory.length > WATERFALL_HISTORY_MAX) waterfallHistory.length = WATERFALL_HISTORY_MAX;
+        draw();
+      }
     },
     resize,
     setRange: setRangeInternal,
