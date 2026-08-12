@@ -72,9 +72,8 @@ const spectrumDisplay = createSpectrumDisplay($("display-area"), {
     // Click-to-tune lands on the same grid the step buttons walk, not the
     // exact (sub-Hz) pixel clicked.
     const hz = snapToStep(rawHz, stepHz);
-    client.tune(hz);
+    tuneTo(hz);
     if (azcEnabled) client.zoomCenter(hz);
-    maybeAutoSwitchMode(hz);
   },
 });
 client.addEventListener("spectrum", (e) => {
@@ -195,31 +194,52 @@ client.addEventListener("frontend", (e) => {
 });
 
 // ---- Frequency digits + step spinner ----
-const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => client.tune(newHz));
+const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => tuneTo(newHz));
 
-client.addEventListener("tunedFreq", (e) => {
-  const { hz } = e.detail;
+// Single choke point for every real frequency change (page load's initial
+// server echo, click-to-tune, band select, memory recall, step buttons,
+// typed entry) - band label and mode-by-frequency used to only update from
+// a couple of the manual-tune call sites, so the BAND segment showed "—"
+// forever on a fresh page load and other paths (step buttons, memory
+// recall) never triggered mode-by-frequency at all. Reported live
+// (2026-08-11).
+function applyTunedFreq(hz) {
   currentFreqHz = hz;
   digitDisplay.render(hz);
   spectrumDisplay.setTunedFreqHz(hz);
-  // Single choke point for every real frequency change (page load's
-  // initial server echo, click-to-tune, band select, memory recall, step
-  // buttons, typed entry) - band label and mode-by-frequency used to only
-  // update from a couple of the manual-tune call sites, so the BAND
-  // segment showed "—" forever on a fresh page load and other paths
-  // (step buttons, memory recall) never triggered mode-by-frequency at
-  // all. Reported live (2026-08-11).
   const band = bandForFrequency(hz);
   $("v-band").textContent = band ? band.label.toUpperCase() : "FULL BAND";
   maybeAutoSwitchMode(hz);
-});
+}
+
+// Sends the tune command AND applies it locally right away (optimistic
+// update), rather than only reacting to the server's tunedFreq echo below.
+// VHF/UHF each have a private radiod instance and confirm a real tune in
+// well under 100ms, so the difference was never visible there - but HF's
+// ka9q-web instance is a passive subscriber sharing the real production
+// radiod (consumers/ka9q-web-hf/compose.yaml), and a live round-trip
+// measurement (headless-Chromium/CDP, capturing the real WS traffic) found
+// its BFREQ confirmation can take on the order of 20+ seconds to arrive -
+// the frequency digits and BAND label sat on the old value that whole
+// time, reported as "tuning doesn't update the display" (issue 16). The
+// eventual real tunedFreq event (below) still re-applies the SAME
+// function afterward, so it remains authoritative if the confirmed
+// frequency ever differs from what was requested (e.g. adopted from
+// another client) - this only removes the wait for the common case where
+// it doesn't.
+function tuneTo(hz) {
+  client.tune(hz);
+  applyTunedFreq(hz);
+}
+
+client.addEventListener("tunedFreq", (e) => applyTunedFreq(e.detail.hz));
 
 $("step-value").textContent = fmtStep(stepHz);
 $("step-up").addEventListener("click", () => {
-  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, stepHz, 1));
+  if (currentFreqHz !== null) tuneTo(applyStep(currentFreqHz, stepHz, 1));
 });
 $("step-down").addEventListener("click", () => {
-  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, stepHz, -1));
+  if (currentFreqHz !== null) tuneTo(applyStep(currentFreqHz, stepHz, -1));
 });
 createValuePanel($("step-value"), (panel, close) => {
   panel.innerHTML = `
@@ -282,11 +302,11 @@ createValuePanel($("sgm-band"), (panel, close) => {
       // slider) centred on the receiver's actual coverage midpoint. That
       // midpoint deliberately isn't inside any HAM_BAND_EDGES entry for a
       // wideband front end (HF), so the BAND segment's existing "FULL
-      // BAND" fallback label (tunedFreq handler, bandForFrequency() ->
-      // null) picks it up for free once the server echoes the retune.
+      // BAND" fallback label (applyTunedFreq(), bandForFrequency() ->
+      // null) picks it up immediately via tuneTo()'s optimistic update.
       client.setZoomLevel(0);
       const center = Math.round((currentCoverage.lowHz + currentCoverage.highHz) / 2);
-      client.tune(center);
+      tuneTo(center);
       close();
       return;
     }
@@ -299,14 +319,11 @@ createValuePanel($("sgm-band"), (panel, close) => {
   panel.querySelector("#band-chips").addEventListener("click", (e) => {
     const freq = e.target.dataset.freq;
     if (!freq) return;
-    // v-band is NOT set here - the central tunedFreq handler (below)
-    // recomputes it from the confirmed frequency once the server echoes
-    // it back, which is the single source of truth. Setting it here too
-    // would show this chip's own label only to have it immediately
-    // overwritten - fine for "2M"/"70CM" where the two agree, but wrong
-    // for e.g. a WWV quick-tune, which isn't inside any specific ham band.
-    client.tune(Number(freq));
-    maybeAutoSwitchMode(Number(freq));
+    // v-band and mode both come from tuneTo()'s optimistic applyTunedFreq()
+    // call now, the same single source of truth the real tunedFreq echo
+    // uses - correct for both "2M"/"70CM" (matches the chip's own label)
+    // and e.g. a WWV quick-tune (not inside any specific ham band).
+    tuneTo(Number(freq));
     close();
   });
 });
@@ -333,7 +350,7 @@ createValuePanel($("sgm-mem"), (panel, close) => {
       $("v-mem").textContent = String(memories.length);
       close();
     } else if (recall) {
-      client.tune(memories[Number(recall.dataset.recall)].freqHz);
+      tuneTo(memories[Number(recall.dataset.recall)].freqHz);
       close();
     }
   });
