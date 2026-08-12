@@ -83,9 +83,22 @@ def docker_api_get(path):
 
 
 def discover_sibling_containers():
-    """Every container running this same image, via Docker's own API - not
-    a hand-maintained list. Returns [{name, port, mcast}, ...]."""
-    filters = urllib.parse.quote(json.dumps({"ancestor": ["ka9q-web:latest"]}))
+    """Every container running this same role, via Docker's own API - not
+    a hand-maintained list. Returns [{name, port, mcast}, ...].
+
+    Filters by container NAME prefix, not `ancestor: ka9q-web:latest` (the
+    original approach) - confirmed live, 2026-08-12: `ancestor` resolves
+    the tag to whatever specific image ID it CURRENTLY points to and only
+    matches containers bound to that exact ID. Every fix deployed this
+    session rebuilt and re-tagged ka9q-web:latest, but the three consumers
+    are redeployed independently, one at a time - so at any moment,
+    whichever container was redeployed most recently is bound to a
+    different (newer) image ID than its still-running siblings, and
+    `ancestor` silently excludes them. A sibling is defined by its ROLE
+    (its stable container name), not by which exact build it happens to
+    be running at this moment - name-prefix matching doesn't have this
+    problem."""
+    filters = urllib.parse.quote(json.dumps({"name": ["ka9q-web-"]}))
     containers = docker_api_get(f"/containers/json?filters={filters}")
     siblings = []
     for c in containers:
