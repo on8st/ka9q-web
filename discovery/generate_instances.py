@@ -100,8 +100,20 @@ def discover_sibling_containers():
     problem."""
     filters = urllib.parse.quote(json.dumps({"name": ["ka9q-web-"]}))
     containers = docker_api_get(f"/containers/json?filters={filters}")
+    own_id = socket.gethostname()  # Docker sets this to the short container ID by default
     siblings = []
     for c in containers:
+        if c["Id"].startswith(own_id):
+            # Skip self - the frontend already adds a "self" entry from its
+            # own live connection (isSelf: true, shown as "here"). Only
+            # matters for the background --daemon refresh: the one-shot
+            # run at boot (before this container's own ka9q-web binary is
+            # listening) never found itself anyway, but a later daemon
+            # refresh - running once the real server is up - can
+            # successfully WS-connect to itself, which would otherwise add
+            # a redundant, clickable-to-itself duplicate of "self" for
+            # every consumer running the daemon fix (confirmed live).
+            continue
         detail = docker_api_get(f"/containers/{c['Id']}/json")
         name = detail["Name"].lstrip("/")
         cmd = detail["Config"]["Cmd"] or []
