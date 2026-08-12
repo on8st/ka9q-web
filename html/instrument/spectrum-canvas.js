@@ -351,6 +351,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   // regardless of how tall the waterfall is resized to.
   let waterfallHistory = [];
   const WATERFALL_HISTORY_MAX = 4096;
+  let lastSpanKey = null; // `${centerHz}|${binWidthHz}|${binCount}` of the frame history was captured under
 
   function setSpectrumPercent(pct) {
     spectrumPercent = clampSpectrumPercent(pct);
@@ -805,6 +806,26 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
       // a backlog and dump it all in at once on unpause - a new
       // discontinuity this fix shouldn't introduce.
       if (!paused) {
+        // binIndexForPixel() maps a pixel position to a bin index purely
+        // by proportion within THAT row's own bin array - it has no idea
+        // what frequency any given bin actually represents. A stored row
+        // is only valid to redraw at the CURRENT pixel layout if it was
+        // captured under the exact same centerHz/binWidthHz/binCount -
+        // change any of those (zoom level, re-centering, a retune) and
+        // every old row would be redrawn as if it still spanned the new
+        // frequency range, showing completely wrong content at wrong
+        // positions. Confirmed live: 9 rapid zoom-in clicks turned the
+        // waterfall into a garish, meaningless wash - old, differently-
+        // scoped rows getting recoloured AND remapped onto a pixel
+        // layout they were never captured under. Clear the history
+        // outright on any span change instead - a fresh, empty waterfall
+        // that fills back in is correct; a full one showing stale,
+        // mis-mapped data is not.
+        const spanKey = `${spectrum.centerHz}|${spectrum.binWidthHz}|${spectrum.binCount}`;
+        if (spanKey !== lastSpanKey) {
+          waterfallHistory.length = 0;
+          lastSpanKey = spanKey;
+        }
         waterfallHistory.unshift(Float32Array.from(rowBins));
         if (waterfallHistory.length > WATERFALL_HISTORY_MAX) waterfallHistory.length = WATERFALL_HISTORY_MAX;
         draw();
