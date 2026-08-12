@@ -111,15 +111,42 @@ function percentForMetric(metric, values) {
  * or a values object carrying whichever of ifPowerDb/basebandPowerDb/
  * noiseDensityDb/bandwidthHz/inputSamprate/samplesSinceOver the current
  * metric needs. */
+// If the selected metric (SNR/OVR) stays invalid this long, fall back to
+// "signal" - confirmed live that some stations never populate
+// BASEBAND_POWER/NOISE_DENSITY (arrive as zero-length fields, decoding to
+// -Infinity dB, permanently failing the finite check) regardless of
+// meter style, so a metric choice persisted from an earlier session (or
+// a station where it once worked) can leave the meter reading "—"
+// forever with no way back to a working state short of clearing
+// localStorage. "signal" always has a value once any frontend/spectrum
+// data has arrived at all, so it's the one metric always safe to fall
+// back to. 5s is long enough to not misfire on a brief startup gap
+// (page load, mode/frequency change) before the first real reading
+// arrives, short enough that the meter doesn't sit blank for long.
+const FALLBACK_METRIC = "signal";
+const INVALID_FALLBACK_MS = 5000;
+
 export function createMeter(container) {
   let style = localStorage.getItem(STORAGE_KEY) || "bar";
   let metric = METRICS.includes(localStorage.getItem(METRIC_KEY)) ? localStorage.getItem(METRIC_KEY) : "signal";
   let lastValues = null;
+  let invalidSinceMs = null; // when the current metric first went invalid, or null while valid/unknown
 
   function render(dbOrValues) {
     lastValues = (typeof dbOrValues === "number") ? { ifPowerDb: dbOrValues } : (dbOrValues || {});
     const { valid, percent } = percentForMetric(metric, lastValues);
-    if (!valid) { container.innerHTML = "—"; return; }
+    if (!valid) {
+      container.innerHTML = "—";
+      if (metric !== FALLBACK_METRIC) {
+        const now = Date.now();
+        if (invalidSinceMs === null) invalidSinceMs = now;
+        else if (now - invalidSinceMs >= INVALID_FALLBACK_MS) {
+          setMetric(FALLBACK_METRIC);
+        }
+      }
+      return;
+    }
+    invalidSinceMs = null;
     (style === "analog" ? renderAnalog : renderBar)(container, percent);
   }
 
@@ -132,6 +159,7 @@ export function createMeter(container) {
   function setMetric(newMetric) {
     if (!METRICS.includes(newMetric)) return;
     metric = newMetric;
+    invalidSinceMs = null;
     localStorage.setItem(METRIC_KEY, metric);
     render(lastValues);
   }

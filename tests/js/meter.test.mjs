@@ -139,3 +139,48 @@ test("render(-40) (the pre-existing plain-number call shape) still works as Sign
   meter.render(-40);
   assert.match(el.innerHTML, /width:50\.0%/);
 });
+
+// Confirmed live (2026-08-12): some stations always send BASEBAND_POWER/
+// NOISE_DENSITY as zero-length fields, decoding to -Infinity dB - SNR (and
+// similarly OVR, if inputSamprate/samplesSinceOver are never populated)
+// can be permanently invalid there, and since the metric choice persists
+// via localStorage, the meter would otherwise stay on "—" forever with no
+// way back short of clearing storage. "signal" is the one metric that's
+// always valid once any frontend/spectrum data has arrived at all.
+test("meter falls back from SNR to Signal after being invalid for a sustained period", () => {
+  localStorage.clear();
+  const el = fakeContainer();
+  const meter = createMeter(el);
+  const realNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+  try {
+    meter.setMetric("snr"); // no data yet - starts the invalid streak
+    assert.equal(meter.getMetric(), "snr"); // not yet - streak just started
+    now += 5001; // past the fallback threshold
+    meter.render({ ifPowerDb: -40 }); // still no SNR inputs; Signal's ifPowerDb present
+    assert.equal(meter.getMetric(), "signal"); // fell back
+    assert.match(el.innerHTML, /width:50\.0%/); // and immediately shows a real reading
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test("meter does not fall back while the selected metric keeps producing valid readings", () => {
+  localStorage.clear();
+  const el = fakeContainer();
+  const meter = createMeter(el);
+  const realNow = Date.now;
+  let now = 1_000_000;
+  Date.now = () => now;
+  try {
+    meter.setMetric("ovr");
+    for (let i = 0; i < 10; i++) {
+      now += 1000; // 10 seconds total, well past the fallback threshold
+      meter.render({ inputSamprate: 2_400_000, samplesSinceOver: 2_400_000 });
+    }
+    assert.equal(meter.getMetric(), "ovr"); // valid throughout - never fell back
+  } finally {
+    Date.now = realNow;
+  }
+});
