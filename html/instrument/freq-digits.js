@@ -6,7 +6,11 @@
 // step means carries happen for free, no manual borrow/carry logic needed.
 // DOM structure/styling matches the approved design mockup exactly
 // (lead-zero dimming, dot separators, MHz suffix, hover half-highlight,
-// wheel-to-step, double-click to type an exact value).
+// wheel-to-step). The mockup's double-click-to-type-an-exact-value
+// affordance was removed at the operator's request - it replaced the
+// digit display with a plain text input, which read as a jarring mode
+// switch rather than the VFO-style interaction the rest of this widget
+// commits to.
 
 // 999,999,999 Hz (999.999999 MHz) comfortably covers HF through UHF on
 // this station; a real 9-digit odometer display.
@@ -28,22 +32,15 @@ export function stepFreqAtDigit(hz, digitIndexFromRight, direction) {
 
 /**
  * Builds the digit row inside `container`. Calls onStep(newHz) whenever a
- * digit is stepped (click or wheel) or an exact value is typed (double-
- * click) - it does NOT update the display itself (the caller decides
- * whether/when to reflect a step immediately or wait for the server's own
- * tunedFreq echo, same "server state is authoritative" posture
- * ka9q-web.c itself takes - see PROTOCOL-TEXT.md). Call the returned
- * render(hz) to set what's shown.
+ * digit is stepped (click or wheel) - it does NOT update the display
+ * itself (the caller decides whether/when to reflect a step immediately
+ * or wait for the server's own tunedFreq echo, same "server state is
+ * authoritative" posture ka9q-web.c itself takes - see PROTOCOL-TEXT.md).
+ * Call the returned render(hz) to set what's shown.
  */
 export function createDigitDisplay(container, onStep, numDigits = NUM_DIGITS) {
   container.classList.add("digits");
   let currentHz = 0;
-  // While the exact-value input is open, incoming server updates (e.g. the
-  // periodic tunedFreq echo - PROTOCOL-TEXT.md) must not overwrite
-  // container.innerHTML out from under the user's typing/focus. render()
-  // still records the latest value so the digits reflect it the moment
-  // editing ends.
-  let editing = false;
 
   function renderDigits() {
     const s = digitsForFreq(currentHz, numDigits);
@@ -61,7 +58,7 @@ export function createDigitDisplay(container, onStep, numDigits = NUM_DIGITS) {
 
   function render(hz) {
     currentHz = hz;
-    if (!editing) renderDigits();
+    renderDigits();
   }
   render(0);
 
@@ -88,30 +85,6 @@ export function createDigitDisplay(container, onStep, numDigits = NUM_DIGITS) {
     e.preventDefault();
     onStep(stepFreqAtDigit(currentHz, Number(d.dataset.idx), e.deltaY < 0 ? 1 : -1));
   }, { passive: false });
-  container.addEventListener("dblclick", (e) => {
-    e.stopPropagation();
-    editing = true;
-    const input = document.createElement("input");
-    input.id = "freq-entry";
-    input.className = "freq-entry";
-    input.value = (currentHz / 1000).toFixed(3);
-    container.innerHTML = "";
-    container.appendChild(input);
-    input.focus();
-    input.select();
-    const commit = () => {
-      editing = false;
-      const v = parseFloat(input.value.replace(/[^0-9.]/g, ""));
-      if (Number.isFinite(v)) onStep(Math.round(v * 1000));
-      else renderDigits();
-    };
-    input.addEventListener("blur", commit);
-    input.addEventListener("keydown", (ev) => {
-      ev.stopPropagation();
-      if (ev.key === "Enter") commit();
-      if (ev.key === "Escape") { editing = false; renderDigits(); }
-    });
-  });
 
   return { render };
 }
