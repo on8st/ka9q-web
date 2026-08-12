@@ -318,6 +318,16 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   let paused = false;
   let lastSpectrum = null;
   let tunedFreqHz = null;
+  // Real per-mode filter passband, Hz relative to the carrier (e.g. USB
+  // ~+50..+3000, LSB ~-3000..-50, AM/FM/SAM roughly symmetric around 0) -
+  // null until the server's first filterEdges echo arrives. Used to make
+  // the tuned-frequency highlight band reflect the ACTUAL passband
+  // instead of a fixed, always-symmetric width regardless of mode -
+  // reported live: switching to USB left the highlight exactly as wide
+  // and centred as FM/AM, not offset to one side the way a real USB
+  // passband is.
+  let filterLowHz = null;
+  let filterHighHz = null;
   let manualRange = null; // {minDb, maxDb} once the operator sets one explicitly
   let smoothMinDb = null;
   let smoothMaxDb = null;
@@ -688,8 +698,30 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     if (tunedFreqHz !== null) {
       const x = pixelForHz(tunedFreqHz, w, centerHz, binWidthHz, binCount);
       if (x !== null) {
+        let xLow, xHigh;
+        if (filterLowHz !== null && filterHighHz !== null) {
+          // Real passband - not necessarily symmetric around the carrier
+          // (USB/LSB/CW aren't). Computed directly rather than via
+          // pixelForHz(), which returns null outside the displayed span -
+          // an edge partially off-screen (e.g. zoomed in tight near one
+          // side of the passband) should still show what IS visible,
+          // clipped to the canvas, not silently fall back to the fixed-
+          // width band below.
+          const spanHz = binWidthHz * binCount;
+          const startHz = centerHz - spanHz / 2;
+          const rawPixelForHz = (hz) => ((hz - startHz) / spanHz) * w;
+          xLow = Math.max(0, Math.min(w, rawPixelForHz(tunedFreqHz + filterLowHz)));
+          xHigh = Math.max(0, Math.min(w, rawPixelForHz(tunedFreqHz + filterHighHz)));
+          if (xLow > xHigh) [xLow, xHigh] = [xHigh, xLow];
+        } else {
+          // No real filter edges yet (server hasn't echoed any) - fall
+          // back to the original fixed-width band rather than showing
+          // nothing.
+          xLow = x - w * 0.0175;
+          xHigh = x + w * 0.0175;
+        }
         ctx.fillStyle = "rgba(86,199,255,0.13)";
-        ctx.fillRect(x - w * 0.0175, 0, w * 0.035, wfTop);
+        ctx.fillRect(xLow, 0, xHigh - xLow, wfTop);
         ctx.strokeStyle = "#56C7FF";
         ctx.beginPath();
         ctx.moveTo(x, 0);
@@ -785,6 +817,11 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     setPaused: (v) => { paused = v; },
     isPaused: () => paused,
     setTunedFreqHz: (hz) => { tunedFreqHz = hz; if (!paused) draw(); },
+    setFilterEdges: (lowHz, highHz) => {
+      filterLowHz = Number.isFinite(lowHz) ? lowHz : null;
+      filterHighHz = Number.isFinite(highHz) ? highHz : null;
+      if (!paused) draw();
+    },
     getLastSpectrum: () => lastSpectrum,
     setSpectrumPercent,
     getSpectrumPercent: () => spectrumPercent,

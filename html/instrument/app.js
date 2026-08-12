@@ -546,6 +546,7 @@ $("filter-edges-send").addEventListener("click", () => {
 client.addEventListener("filterEdges", (e) => {
   if (!filterLowDirty) $("filter-low").value = String(e.detail.lowHz);
   if (!filterHighDirty) $("filter-high").value = String(e.detail.highHz);
+  spectrumDisplay.setFilterEdges(e.detail.lowHz, e.detail.highHz);
 });
 let shiftDirty = false;
 $("shift-input").addEventListener("input", () => { shiftDirty = true; });
