@@ -398,11 +398,18 @@ function updateSelfEntry(fe) {
 
 function renderSwitcherSegment() {
   const all = selfEntry ? [selfEntry, ...siblingList] : siblingList;
-  $("sgm-sdr").hidden = all.length < 2;
-  if (all.length >= 2) $("v-sdr").textContent = selfEntry ? selfEntry.name : "";
+  // Lives next to the station/front-end badge (#ident, top-left) rather
+  // than its own dock segment - moved at the operator's request, "you
+  // already have a source indicator there". #ident stays visible either
+  // way (it's always showing real info); .switchable just adds the
+  // pointer cursor/hover hint for when there's actually something to
+  // switch to. The click handler below is wired unconditionally either
+  // way - with only one instance the panel just shows "1 detected... here",
+  // which is harmless, not worth gating on a second listener.
+  $("ident").classList.toggle("switchable", all.length >= 2);
 }
 
-createValuePanel($("sgm-sdr"), (panel, close) => {
+createValuePanel($("ident"), (panel, close) => {
   const all = selfEntry ? [selfEntry, ...siblingList] : siblingList;
   panel.innerHTML = `
     <div class="pop-head"><span>Receivers</span><span>${all.length} detected on this host</span></div>

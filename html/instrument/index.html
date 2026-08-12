@@ -126,8 +126,10 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
 .chk input{accent-color:var(--live);margin:0}
 .pop-body input[type=range],.bd input[type=range]{accent-color:var(--live)}
 #toolbar{position:absolute;top:14px;right:14px;display:flex;gap:6px;z-index:31}
-#ident{position:absolute;top:14px;left:14px;z-index:31;padding:6px 11px;font-size:11px;color:var(--dim)}
+#ident{position:absolute;top:14px;left:14px;z-index:31;padding:6px 11px;font-size:11px;color:var(--dim);cursor:default}
 #ident b{color:var(--text);font-weight:600;letter-spacing:.04em}
+#ident.switchable{cursor:pointer}
+#ident.switchable:hover{background:rgba(86,199,255,.10)}
 
 #drawer{
   position:absolute;top:0;right:0;bottom:0;width:min(370px,90%);z-index:45;
@@ -183,7 +185,6 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
 
   <div id="dockslot">
     <div id="instrument" class="glass">
-      <div class="sgm" id="sgm-sdr" hidden><span class="cap">SDR</span><span class="val sm" id="v-sdr">—</span></div>
       <div class="sgm" id="sgm-mem"><span class="cap">Mem</span><span class="val" id="v-mem">—</span></div>
       <div class="sgm" id="sgm-band"><span class="cap">Band</span><span class="val" id="v-band">—</span></div>
 
