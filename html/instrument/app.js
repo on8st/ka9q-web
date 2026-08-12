@@ -6,7 +6,7 @@
 import { Ka9qWebClient } from "./ws-client.js";
 import { createDigitDisplay } from "./freq-digits.js";
 import { createValuePanel } from "./value-panel.js";
-import { STEP_OPTIONS_HZ, applyStep, fmtStep, ALT_STEP_HZ, roundToNearestKhz, snapToStep } from "./tune-step.js";
+import { STEP_OPTIONS_HZ, applyStep, fmtStep, snapToStep } from "./tune-step.js";
 import { modeForFrequency } from "./mode-by-frequency.js";
 import { bandsInCoverage, BAND_OPTIONS } from "./band-options.js";
 import { bandForFrequency } from "./band-edges.js";
@@ -55,16 +55,6 @@ function maybeAutoSwitchMode(hz) {
   if (mode && mode !== client.mode) client.setMode(mode);
 }
 
-// "Alternate frequency buttons" (stock: alternate_freq_buttons - another
-// manifest-name misnomer, see tune-step.js) - declared early since both
-// the digit display's typed-entry commit and the step buttons below
-// reference it. No persistence in stock either, resets every reload.
-// Simplified: applies the round-to-nearest-kHz to both typed entry and
-// digit-click nudges alike (stock only rounds typed "Set" entry) - a
-// single onStep callback handles both paths in this UI's freq-digits.js,
-// and splitting them for this rarely-used toggle wasn't worth a new API.
-let altStepEnabled = false;
-
 // ---- Spectrum/waterfall: fills #display-area, per "the receiver fills
 // the screen" (brief section 4). ----
 // "Keep frequency centred" - declared before createSpectrumDisplay since
@@ -80,9 +70,8 @@ function setAzcEnabled(v) {
 const spectrumDisplay = createSpectrumDisplay($("display-area"), {
   onTune: (rawHz) => {
     // Click-to-tune lands on the same grid the step buttons walk, not the
-    // exact (sub-Hz) pixel clicked - matches the step shown in FREQUENCY's
-    // own controls, including the "Alt" fixed-10Hz override.
-    const hz = snapToStep(rawHz, altStepEnabled ? ALT_STEP_HZ : stepHz);
+    // exact (sub-Hz) pixel clicked.
+    const hz = snapToStep(rawHz, stepHz);
     client.tune(hz);
     if (azcEnabled) client.zoomCenter(hz);
     maybeAutoSwitchMode(hz);
@@ -206,7 +195,7 @@ client.addEventListener("frontend", (e) => {
 });
 
 // ---- Frequency digits + step spinner ----
-const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => client.tune(altStepEnabled ? roundToNearestKhz(newHz) : newHz));
+const digitDisplay = createDigitDisplay($("vfo-digits"), (newHz) => client.tune(newHz));
 
 client.addEventListener("tunedFreq", (e) => {
   const { hz } = e.detail;
@@ -226,15 +215,11 @@ client.addEventListener("tunedFreq", (e) => {
 });
 
 $("step-value").textContent = fmtStep(stepHz);
-$("alt-step").addEventListener("click", () => {
-  altStepEnabled = !altStepEnabled;
-  $("alt-step").classList.toggle("on", altStepEnabled);
-});
 $("step-up").addEventListener("click", () => {
-  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, altStepEnabled ? ALT_STEP_HZ : stepHz, 1));
+  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, stepHz, 1));
 });
 $("step-down").addEventListener("click", () => {
-  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, altStepEnabled ? ALT_STEP_HZ : stepHz, -1));
+  if (currentFreqHz !== null) client.tune(applyStep(currentFreqHz, stepHz, -1));
 });
 createValuePanel($("step-value"), (panel, close) => {
   panel.innerHTML = `
