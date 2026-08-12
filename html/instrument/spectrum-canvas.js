@@ -360,17 +360,34 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   // the first version of this fix did). Instead: the common case (a new
   // row arriving, range drifting by the usual small per-frame smoothing
   // amount) uses the original cheap approach - scroll existing pixels,
-  // paint just the new row - and a full recolor only runs periodically
-  // (bounding how stale already-drawn rows can look to at most
-  // FULL_RECOLOR_INTERVAL_MS) or immediately when something that
-  // actually invalidates the existing pixels happens: the panel's
+  // paint just the new row - and a full recolor only runs when something
+  // that actually invalidates the existing pixels happens: the panel's
   // layout changed (resize, spectrum/waterfall split moved - the exact
-  // mechanism issue 8's bug lived in) or a color-affecting setting
-  // changed directly (bias/colormap/manual range - forceFullRecolorNext).
+  // mechanism issue 8's bug lived in), a color-affecting setting changed
+  // directly (bias/colormap/manual range - forceFullRecolorNext), the
+  // autorange range has drifted enough to matter, or a long backstop
+  // interval has elapsed regardless (belt-and-braces against any drift
+  // path this doesn't otherwise catch).
+  //
+  // The range check is drift-based (RANGE_DRIFT_RECOLOR_DB), not purely
+  // a short wall-clock timer - an earlier version used a flat 500ms
+  // period, which turned out shorter than this station's real spectrum
+  // frame interval (~1s), so it ended up doing a full recolor on
+  // essentially every frame anyway: still correct, but it defeated the
+  // fast path entirely and its cost (computed inline with the trace, in
+  // the same synchronous draw() call) showed up live as flicker in the
+  // waterfall's newest rows and brief stutter in the spectrum trace
+  // above it (reported live). AUTORANGE_SMOOTHING means minDb/maxDb
+  // wobble a little every real frame regardless - recoloring on every
+  // wobble would be just as bad, so only a drift past a perceptible
+  // threshold (half AUTORANGE_PADDING_DB) triggers one early.
   let lastWfTop = null;
   let lastWfH = null;
   let lastFullRecolorAt = 0;
-  const FULL_RECOLOR_INTERVAL_MS = 500;
+  let lastRecoloredMinDb = null;
+  let lastRecoloredMaxDb = null;
+  const RANGE_DRIFT_RECOLOR_DB = AUTORANGE_PADDING_DB / 2;
+  const FULL_RECOLOR_INTERVAL_MS = 4000; // long backstop, not the routine trigger
   let forceFullRecolorNext = true; // first draw always does a full paint
 
   // draw() is called far more often than real spectrum frames arrive -
@@ -613,17 +630,18 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     // Full recolor (occasional): repaint every visible row from stored
     // history against the current range - O(width x height), only run
     // when the layout just changed, a color-affecting setting just
-    // changed directly, or it's simply been a while (bounding how stale
-    // an already-drawn row can look after a range shift that happened
-    // via ordinary autorange drift, without needing to detect that
-    // drift precisely).
+    // changed directly, the range has drifted past RANGE_DRIFT_RECOLOR_DB
+    // since the last full recolor, or the long backstop interval elapsed.
     const wfTop = Math.floor(splitY);
     const wfH = Math.floor(h - splitY);
     if (wfH > 0) {
       const now = Date.now();
       const layoutChanged = wfTop !== lastWfTop || wfH !== lastWfH;
+      const rangeDrifted = lastRecoloredMinDb === null ||
+        Math.abs(minDb - lastRecoloredMinDb) >= RANGE_DRIFT_RECOLOR_DB ||
+        Math.abs(maxDb - lastRecoloredMaxDb) >= RANGE_DRIFT_RECOLOR_DB;
       const periodicDue = now - lastFullRecolorAt >= FULL_RECOLOR_INTERVAL_MS;
-      const doFullRecolor = layoutChanged || periodicDue || forceFullRecolorNext;
+      const doFullRecolor = layoutChanged || rangeDrifted || periodicDue || forceFullRecolorNext;
 
       if (doFullRecolor) {
         const img = ctx.createImageData(w, wfH);
@@ -658,6 +676,8 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
         lastWfTop = wfTop;
         lastWfH = wfH;
         lastFullRecolorAt = now;
+        lastRecoloredMinDb = minDb;
+        lastRecoloredMaxDb = maxDb;
         forceFullRecolorNext = false;
         lastDrawnWfSeq = waterfallSeq;
       } else if (waterfallSeq !== lastDrawnWfSeq && waterfallHistory.length > 0) {
