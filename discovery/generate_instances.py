@@ -2,9 +2,25 @@
 """Zero-config sibling-instance discovery for the instrument UI.
 
 Runs once at container startup (see the Dockerfile ENTRYPOINT), before
-exec'ing the real ka9q-web binary. Writes html/instrument/instances.json,
-then execs the real binary with the original argv so it becomes PID 1 - this
-script never stays resident and never proxies anything at runtime.
+exec'ing the real ka9q-web binary, so startup isn't delayed by discovery -
+writes html/instrument/instances.json immediately with whatever's
+reachable at that moment, then execs the real binary with the original
+argv so it becomes PID 1.
+
+Also spawns a detached background process (--daemon) that re-runs
+discovery every REFRESH_INTERVAL_S and rewrites instances.json - the
+three ka9q-web consumers on this station are redeployed independently,
+one at a time, not together, so a sibling that wasn't up yet at THIS
+container's own boot moment (confirmed live, 2026-08-12: whichever
+consumer redeploys last sees all siblings, whichever redeploys first
+sees only itself - a pure boot-order race, not a detection bug) would
+otherwise stay invisible until this container itself happens to restart
+too. The background process is unaffected by the foreground execv() call
+below - it's a separate child process (subprocess.Popen), not a thread,
+so replacing this process's own image doesn't touch it. Same "background
+watcher via a plain child process, no supervisor" pattern already used in
+this repo's HF radiod image (images/ka9q-radio-hf/Dockerfile's
+start-radiod.sh).
 
 What's zero-config: which ka9q-web containers exist, and each one's real
 coverage (queried live over its own WebSocket, same protocol
@@ -20,7 +36,9 @@ import http.client
 import json
 import os
 import socket
+import subprocess
 import sys
+import time
 import urllib.parse
 
 import websockets.sync.client as ws_client
@@ -41,6 +59,7 @@ from status_decode import (
 DOCKER_SOCKET = "/var/run/docker.sock"
 INSTANCES_JSON_PATH = "/usr/local/share/ka9q-web/html/instrument/instances.json"
 HOSTNAME_MAP_PATH = os.path.join(os.path.dirname(__file__), "public-hostnames.json")
+REFRESH_INTERVAL_S = 30  # background --daemon re-run cadence
 FIELD_DESCRIPTION = 4
 WS_CONNECT_TIMEOUT_S = 3
 WS_READ_DEADLINE_S = 3
@@ -154,7 +173,7 @@ def generate():
     return instances
 
 
-if __name__ == "__main__":
+def run_once():
     try:
         instances = generate()
         os.makedirs(os.path.dirname(INSTANCES_JSON_PATH), exist_ok=True)
@@ -167,6 +186,38 @@ if __name__ == "__main__":
         # the mockup already handles client-side.
         print(f"discovery: failed, continuing without instances.json ({e})", file=sys.stderr)
 
+
+def run_daemon():
+    """Background loop for the detached refresher process (see the module
+    docstring) - re-runs discovery every REFRESH_INTERVAL_S for the life
+    of the container, so a sibling that boots after this one still shows
+    up eventually instead of staying invisible until this container's own
+    next restart."""
+    while True:
+        time.sleep(REFRESH_INTERVAL_S)
+        run_once()
+
+
+if __name__ == "__main__":
+    if "--daemon" in sys.argv:
+        run_daemon()
+        sys.exit(0)
+
+    run_once()
+
+    # Detached background refresher, separate from the foreground exec
+    # below - see module docstring. start_new_session=True so it isn't
+    # tied to this process's controlling terminal/session; it remains a
+    # normal child of PID 1 either way, since execv() doesn't fork - it
+    # replaces this process's own image in place, so the PID that spawned
+    # this child is the same PID that becomes ka9q-web.
+    subprocess.Popen(
+        [sys.executable, os.path.abspath(__file__), "--daemon"],
+        stdout=sys.stderr, stderr=sys.stderr,
+        start_new_session=True,
+    )
+
     # Replace this process with the real binary - it becomes PID 1, normal
-    # signal handling, this script never stays resident.
+    # signal handling, this script (the foreground copy) never stays
+    # resident - the daemon copy above does, deliberately.
     os.execv("/usr/local/sbin/ka9q-web", ["/usr/local/sbin/ka9q-web"] + sys.argv[1:])
