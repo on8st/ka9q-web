@@ -909,6 +909,24 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   return {
     render: (spectrum) => {
       lastSpectrum = spectrum;
+      // Autorange state must not carry over across a real span/context
+      // change (zoom, retune, band switch) - the cached floor/ceiling
+      // reflect whatever was under the OLD view, not the new one. Left
+      // alone, the display sat on stale numbers and only crawled toward
+      // the truth via the normal EMA + 3s-commit cadence - about a
+      // minute of visibly-stepped, wrong-looking range before it
+      // settled (reported live: "starts way too low"). Resetting here,
+      // BEFORE updateAutorange() runs for this frame, makes it re-seed
+      // directly from fresh data instead (see updateAutorange()'s own
+      // "first call" branch) - as fast as the very first page load,
+      // which was already instant for the same reason.
+      const spanKey = `${spectrum.centerHz}|${spectrum.binWidthHz}|${spectrum.binCount}`;
+      if (spanKey !== lastSpanKey) {
+        smoothMinDb = null;
+        smoothMaxDb = null;
+        rawFloorEma = null;
+        rawTopEma = null;
+      }
       updateAutorange(spectrum.binsDb);
       const rowBins = processFrame(spectrum); // once per real frame only - draw() must never re-run this (see its own call sites)
       // Gated on !paused, matching the pre-existing pause semantics: the
@@ -933,8 +951,10 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
         // layout they were never captured under. Clear the history
         // outright on any span change instead - a fresh, empty waterfall
         // that fills back in is correct; a full one showing stale,
-        // mis-mapped data is not.
-        const spanKey = `${spectrum.centerHz}|${spectrum.binWidthHz}|${spectrum.binCount}`;
+        // mis-mapped data is not. (spanKey itself is computed once above,
+        // before updateAutorange() - the autorange reset there needs the
+        // OLD lastSpanKey too, and re-deriving the same string twice per
+        // frame would be pointless.)
         if (spanKey !== lastSpanKey) {
           waterfallHistory.length = 0;
           lastSpanKey = spanKey;
