@@ -353,6 +353,26 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   const WATERFALL_HISTORY_MAX = 4096;
   let lastSpanKey = null; // `${centerHz}|${binWidthHz}|${binCount}` of the frame history was captured under
 
+  // A full recolor-from-history pass costs O(width x visible rows) - fine
+  // occasionally, not fine every single frame (reported live: the browser
+  // got sluggish, worse the taller the waterfall panel, exactly the
+  // signature of doing this unconditionally on every draw() call, which
+  // the first version of this fix did). Instead: the common case (a new
+  // row arriving, range drifting by the usual small per-frame smoothing
+  // amount) uses the original cheap approach - scroll existing pixels,
+  // paint just the new row - and a full recolor only runs periodically
+  // (bounding how stale already-drawn rows can look to at most
+  // FULL_RECOLOR_INTERVAL_MS) or immediately when something that
+  // actually invalidates the existing pixels happens: the panel's
+  // layout changed (resize, spectrum/waterfall split moved - the exact
+  // mechanism issue 8's bug lived in) or a color-affecting setting
+  // changed directly (bias/colormap/manual range - forceFullRecolorNext).
+  let lastWfTop = null;
+  let lastWfH = null;
+  let lastFullRecolorAt = 0;
+  const FULL_RECOLOR_INTERVAL_MS = 500;
+  let forceFullRecolorNext = true; // first draw always does a full paint
+
   function setSpectrumPercent(pct) {
     spectrumPercent = clampSpectrumPercent(pct);
     localStorage.setItem(SPECTRUM_PERCENT_KEY, String(spectrumPercent));
@@ -363,6 +383,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     waterfallBias = Number(bias);
     if (!Number.isFinite(waterfallBias)) waterfallBias = WATERFALL_BIAS_DEFAULT;
     localStorage.setItem(WATERFALL_BIAS_KEY, String(waterfallBias));
+    forceFullRecolorNext = true;
     if (!paused) draw();
   }
 
@@ -370,6 +391,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     if (!Number.isInteger(idx) || idx < 0 || idx >= COLORMAP_NAMES.length) return;
     colorIndex = idx;
     localStorage.setItem(COLORMAP_INDEX_KEY, String(colorIndex));
+    forceFullRecolorNext = true;
     if (!paused) draw();
   }
 
@@ -512,6 +534,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
 
   function setRangeInternal(minDb, maxDb) {
     manualRange = { minDb, maxDb };
+    forceFullRecolorNext = true;
     if (!paused) draw();
   }
 
@@ -562,56 +585,82 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     const { minDb, maxDb } = currentRange();
 
     // Only the trace region needs an explicit clear - the waterfall
-    // region below it is fully repainted every call anyway (see below),
-    // which already overwrites every pixel there.
+    // region below it always has every pixel overwritten one way or the
+    // other every call (see below), whether that's the fast path's
+    // single new row + scroll, or a full repaint.
     ctx.fillStyle = "#04060A";
     ctx.fillRect(0, 0, w, splitY);
 
-    // Waterfall: fully repainted from waterfallHistory every draw call -
-    // newest row (index 0) at the top (matches the mockup's newest-on-top
-    // convention) - rather than scrolled-and-appended as baked pixels.
-    // Every visible row is recoloured against the CURRENT range/bias/
-    // colormap on every call, so a range change (however it happens)
-    // shows up consistently across the whole panel immediately, instead
-    // of leaving a permanent seam between rows drawn before vs. after the
-    // change (see waterfallHistory's own declaration for the full story).
-    // Costs more per frame than the old self-copy scroll, but draw() is
-    // only ever called on a real incoming frame or a discrete UI action
-    // (never a requestAnimationFrame loop), so at typical panel sizes and
-    // poll rates this is not a meaningful cost - correctness here matters
-    // more than the saved cycles.
+    // Waterfall: two paths, chosen per call - see the state declared
+    // with waterfallHistory/FULL_RECOLOR_INTERVAL_MS above for the full
+    // reasoning. Fast path (the common case, every frame): scroll
+    // existing pixels down 1px, paint only the newest row - O(width).
+    // Full recolor (occasional): repaint every visible row from stored
+    // history against the current range - O(width x height), only run
+    // when the layout just changed, a color-affecting setting just
+    // changed directly, or it's simply been a while (bounding how stale
+    // an already-drawn row can look after a range shift that happened
+    // via ordinary autorange drift, without needing to detect that
+    // drift precisely).
     const wfTop = Math.floor(splitY);
     const wfH = Math.floor(h - splitY);
     if (wfH > 0) {
-      const img = ctx.createImageData(w, wfH);
-      for (let rowIdx = 0; rowIdx < wfH; rowIdx++) {
-        const rowOffset = rowIdx * w * 4;
-        const rowBins = rowIdx < waterfallHistory.length ? waterfallHistory[rowIdx] : null;
-        if (rowBins) {
-          const rowBinCount = rowBins.length;
-          for (let x = 0; x < w; x++) {
-            const db = rowBins[binIndexForPixel(x, w, rowBinCount)];
-            const [r, g, b] = waterfallColor(db, minDb, maxDb);
-            const i = rowOffset + x * 4;
-            img.data[i] = r;
-            img.data[i + 1] = g;
-            img.data[i + 2] = b;
-            img.data[i + 3] = 255;
-          }
-        } else {
-          // No history yet for this row (panel taller than what's been
-          // captured so far - e.g. right after a resize or fresh page
-          // load). putImageData writes alpha literally rather than
-          // compositing, so leaving this transparent would reveal
-          // whatever's behind the canvas instead of a deliberate blank
-          // row - paint the same background colour the trace region uses.
-          for (let x = 0; x < w; x++) {
-            const i = rowOffset + x * 4;
-            img.data[i] = 4; img.data[i + 1] = 6; img.data[i + 2] = 10; img.data[i + 3] = 255;
+      const now = Date.now();
+      const layoutChanged = wfTop !== lastWfTop || wfH !== lastWfH;
+      const periodicDue = now - lastFullRecolorAt >= FULL_RECOLOR_INTERVAL_MS;
+      const doFullRecolor = layoutChanged || periodicDue || forceFullRecolorNext;
+
+      if (doFullRecolor) {
+        const img = ctx.createImageData(w, wfH);
+        for (let rowIdx = 0; rowIdx < wfH; rowIdx++) {
+          const rowOffset = rowIdx * w * 4;
+          const rowBins = rowIdx < waterfallHistory.length ? waterfallHistory[rowIdx] : null;
+          if (rowBins) {
+            const rowBinCount = rowBins.length;
+            for (let x = 0; x < w; x++) {
+              const db = rowBins[binIndexForPixel(x, w, rowBinCount)];
+              const [r, g, b] = waterfallColor(db, minDb, maxDb);
+              const i = rowOffset + x * 4;
+              img.data[i] = r;
+              img.data[i + 1] = g;
+              img.data[i + 2] = b;
+              img.data[i + 3] = 255;
+            }
+          } else {
+            // No history yet for this row (panel taller than what's been
+            // captured so far - e.g. right after a resize or fresh page
+            // load). putImageData writes alpha literally rather than
+            // compositing, so leaving this transparent would reveal
+            // whatever's behind the canvas instead of a deliberate blank
+            // row - paint the same background colour the trace region uses.
+            for (let x = 0; x < w; x++) {
+              const i = rowOffset + x * 4;
+              img.data[i] = 4; img.data[i + 1] = 6; img.data[i + 2] = 10; img.data[i + 3] = 255;
+            }
           }
         }
+        ctx.putImageData(img, 0, wfTop);
+        lastWfTop = wfTop;
+        lastWfH = wfH;
+        lastFullRecolorAt = now;
+        forceFullRecolorNext = false;
+      } else if (waterfallHistory.length > 0) {
+        if (wfH > 1) {
+          ctx.drawImage(canvas, 0, wfTop, w, wfH - 1, 0, wfTop + 1, w, wfH - 1);
+        }
+        const row = ctx.createImageData(w, 1);
+        const rowBins = waterfallHistory[0];
+        const rowBinCount = rowBins.length;
+        for (let x = 0; x < w; x++) {
+          const db = rowBins[binIndexForPixel(x, w, rowBinCount)];
+          const [r, g, b] = waterfallColor(db, minDb, maxDb);
+          row.data[x * 4] = r;
+          row.data[x * 4 + 1] = g;
+          row.data[x * 4 + 2] = b;
+          row.data[x * 4 + 3] = 255;
+        }
+        ctx.putImageData(row, 0, wfTop);
       }
-      ctx.putImageData(img, 0, wfTop);
     }
 
     // Trace, filled below the line (matches the mockup's phosphor-green
@@ -834,7 +883,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     resize,
     setRange: setRangeInternal,
     getRange: () => currentRange(),
-    clearManualRange: () => { manualRange = null; },
+    clearManualRange: () => { manualRange = null; forceFullRecolorNext = true; },
     setPaused: (v) => { paused = v; },
     isPaused: () => paused,
     setTunedFreqHz: (hz) => { tunedFreqHz = hz; if (!paused) draw(); },
