@@ -126,7 +126,7 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
 .chk input{accent-color:var(--live);margin:0}
 .pop-body input[type=range],.bd input[type=range]{accent-color:var(--live)}
 #toolbar{position:absolute;top:14px;right:14px;display:flex;gap:6px;z-index:31}
-#ident{position:absolute;top:14px;left:14px;z-index:31;padding:6px 11px;font-size:11px;color:var(--dim);cursor:default}
+#ident{position:absolute;top:14px;left:14px;z-index:31;padding:6px 11px;font-size:11px;color:var(--dim);cursor:default;display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
 #ident b{color:var(--text);font-weight:600;letter-spacing:.04em}
 #ident.switchable{cursor:pointer}
 #ident.switchable:hover{background:rgba(86,199,255,.10)}
@@ -178,7 +178,7 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
 <div id="app">
   <div id="display-area"></div>
 
-  <div id="ident" class="glass"><b>ON8ST</b> <span id="ident-fe"></span></div>
+  <div id="ident" class="glass"><b>ON8ST</b><span id="ident-fe"></span></div>
   <div id="toolbar">
     <button class="k mini" id="rare-things" title="Telemetry, behaviour, export, notes">⋯</button>
   </div>
