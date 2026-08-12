@@ -373,6 +373,21 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   const FULL_RECOLOR_INTERVAL_MS = 500;
   let forceFullRecolorNext = true; // first draw always does a full paint
 
+  // draw() is called far more often than real spectrum frames arrive -
+  // cursor hover, tuned-frequency/filter-edge echoes, trace-visibility
+  // toggles etc. all call it too. The fast path must only scroll+paint
+  // when a genuinely new row was unshifted onto waterfallHistory since
+  // the last draw(); otherwise it re-paints waterfallHistory[0] (the
+  // SAME row) on every unrelated redraw, walking the waterfall an extra
+  // pixel each time with no new data behind it - then the periodic full
+  // recolor snaps it back to the real history, which reads as the
+  // waterfall drifting forward and then rolling back a couple of lines
+  // on a fixed cadence (confirmed live, matches FULL_RECOLOR_INTERVAL_MS
+  // exactly). waterfallSeq is bumped only in render() when a row is
+  // actually unshifted.
+  let waterfallSeq = 0;
+  let lastDrawnWfSeq = -1;
+
   function setSpectrumPercent(pct) {
     spectrumPercent = clampSpectrumPercent(pct);
     localStorage.setItem(SPECTRUM_PERCENT_KEY, String(spectrumPercent));
@@ -644,7 +659,8 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
         lastWfH = wfH;
         lastFullRecolorAt = now;
         forceFullRecolorNext = false;
-      } else if (waterfallHistory.length > 0) {
+        lastDrawnWfSeq = waterfallSeq;
+      } else if (waterfallSeq !== lastDrawnWfSeq && waterfallHistory.length > 0) {
         if (wfH > 1) {
           ctx.drawImage(canvas, 0, wfTop, w, wfH - 1, 0, wfTop + 1, w, wfH - 1);
         }
@@ -660,7 +676,10 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
           row.data[x * 4 + 3] = 255;
         }
         ctx.putImageData(row, 0, wfTop);
+        lastDrawnWfSeq = waterfallSeq;
       }
+      // else: no new row and nothing invalidated - waterfall pixels are
+      // already correct, leave them untouched.
     }
 
     // Trace, filled below the line (matches the mockup's phosphor-green
@@ -877,6 +896,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
         }
         waterfallHistory.unshift(Float32Array.from(rowBins));
         if (waterfallHistory.length > WATERFALL_HISTORY_MAX) waterfallHistory.length = WATERFALL_HISTORY_MAX;
+        waterfallSeq++;
         draw();
       }
     },
