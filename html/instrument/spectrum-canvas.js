@@ -556,11 +556,29 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   let rawFloorEma = null;
   let rawTopEma = null;
   let lastAutorangeCommitAt = 0;
+  // Confirmed live on HF (RX888): the very first real spectrum frame
+  // after connecting can be a degenerate, all-equal-value placeholder
+  // (every bin at the same dB value) sent briefly before real signal
+  // data flows - not something VHF/UHF's front ends do, but real on
+  // this one. The very first commit snaps directly to whatever it's
+  // given (no EMA blend yet, by design - see below), so a bad seed like
+  // that got baked in and then took the normal ~40s+ of slow 15%-per-
+  // AUTORANGE_COMMIT_INTERVAL_MS steps to climb out of - the whole
+  // trace pinned/clipped at the ceiling that entire time (reported
+  // live). Fix: commit FAST (no EMA, no 3s gate) for the first few real
+  // frames so a bad seed self-corrects in a couple hundred ms instead,
+  // then settle into the slow/smoothed cadence once stabilised.
+  const AUTORANGE_WARMUP_COMMITS = 5;
+  const AUTORANGE_WARMUP_INTERVAL_MS = 300;
+  let autorangeCommitCount = 0;
 
   function updateAutorange(binsDb) {
     const now = Date.now();
-    if (smoothMinDb !== null && now - lastAutorangeCommitAt < AUTORANGE_COMMIT_INTERVAL_MS) return;
+    const warmingUp = autorangeCommitCount < AUTORANGE_WARMUP_COMMITS;
+    const interval = warmingUp ? AUTORANGE_WARMUP_INTERVAL_MS : AUTORANGE_COMMIT_INTERVAL_MS;
+    if (smoothMinDb !== null && now - lastAutorangeCommitAt < interval) return;
     lastAutorangeCommitAt = now;
+    autorangeCommitCount++;
 
     const floor = percentileDb(binsDb, AUTORANGE_FLOOR_PCT);
     let peak = -Infinity;
@@ -571,8 +589,13 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     let top = Math.min(peak + 3, floor + AUTORANGE_MAX_SPAN_DB);
     top = Math.max(top, floor + AUTORANGE_MIN_SPAN_DB);
 
-    rawFloorEma = rawFloorEma === null ? floor : rawFloorEma + AUTORANGE_ALPHA * (floor - rawFloorEma);
-    rawTopEma = rawTopEma === null ? top : rawTopEma + AUTORANGE_ALPHA * (top - rawTopEma);
+    if (warmingUp) {
+      rawFloorEma = floor;
+      rawTopEma = top;
+    } else {
+      rawFloorEma = rawFloorEma === null ? floor : rawFloorEma + AUTORANGE_ALPHA * (floor - rawFloorEma);
+      rawTopEma = rawTopEma === null ? top : rawTopEma + AUTORANGE_ALPHA * (top - rawTopEma);
+    }
 
     smoothMinDb = Math.round((rawFloorEma - AUTORANGE_MARGIN_DB) / AUTORANGE_SNAP_DB) * AUTORANGE_SNAP_DB;
     smoothMaxDb = Math.round(rawTopEma / AUTORANGE_SNAP_DB) * AUTORANGE_SNAP_DB;
@@ -926,6 +949,7 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
         smoothMaxDb = null;
         rawFloorEma = null;
         rawTopEma = null;
+        autorangeCommitCount = 0; // every new view gets the fast warm-up treatment, not just page load
       }
       updateAutorange(spectrum.binsDb);
       const rowBins = processFrame(spectrum); // once per real frame only - draw() must never re-run this (see its own call sites)
