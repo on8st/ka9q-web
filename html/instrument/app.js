@@ -51,12 +51,17 @@ function fmtMHz(hz) {
   return (hz / 1e6).toFixed(3);
 }
 
-// Whole-MHz range label for the "zoom out to everything" chip (e.g. "0-31MHz"
-// for HF's real ~0.015-30.456 MHz coverage) - rounded rather than fmtMHz()'s
-// 3-decimal precision, matching the short, glanceable style of the other
-// band chips ("20M", "WWV10") instead of a fussy exact-edge readout.
+// Whole-MHz range label for the "zoom out to everything" chip (e.g.
+// "0-32MHz" for HF's real ~0.015-30.456 MHz coverage) - rounded rather
+// than fmtMHz()'s 3-decimal precision, matching the short, glanceable
+// style of the other band chips ("20M", "WWV10") instead of a fussy
+// exact-edge readout. The high bound rounds up to the nearest EVEN MHz
+// (not just the nearest whole MHz) - requested explicitly 2026-08-13
+// ("should read 0-32MHz", not the plain ceil() this used to produce,
+// 0-31MHz) - a rounder, friendlier number for a "the whole receiver"
+// label than an odd-numbered exact ceiling.
 function fmtWholeMHzRange(lowHz, highHz) {
-  return `${Math.floor(lowHz / 1e6)}-${Math.ceil(highHz / 1e6)}MHz`;
+  return `${Math.floor(lowHz / 1e6)}-${Math.ceil(highHz / 2e6) * 2}MHz`;
 }
 
 // Per-mode filter edge defaults, ported exactly from stock's
