@@ -1,5 +1,5 @@
-// Every distinct feature reachable in the stock UI (html/radio.html +
-// html/optionsDialog.html), grouped by function rather than 1:1 per DOM
+// Every distinct feature reachable in the stock UI (html/legacy/radio.html +
+// html/legacy/optionsDialog.html), grouped by function rather than 1:1 per DOM
 // id (several ids are just multiple controls for one feature - e.g.
 // spectrum_min/spectrum_max are both "spectrum display range"). Grouped
 // this way because the brief's invariant is about *features* staying
@@ -8,7 +8,8 @@
 // `stockIds`: the stock control(s) this feature is built from - checked
 // against the real file by check-parity.mjs so this manifest can't drift
 // from reality without the check catching it.
-// `instrumentId`: the corresponding element/feature in html/instrument/,
+// `instrumentId`: the corresponding element/feature in html/ (the
+// instrument UI, now the landing page - see html/legacy/ for stock),
 // or null if not yet built. A string here is a claim the check verifies;
 // null is an honest, checked-in gap, not a silent omission.
 export const PARITY_MANIFEST = [

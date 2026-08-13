@@ -12,7 +12,7 @@ globalThis.localStorage ??= (() => {
   };
 })();
 
-const { loadMemories, addMemory, deleteMemory, replaceMemories, defaultLabel, exportMemoriesJson, importMemoriesJson } = await import("../../html/instrument/memories.js");
+const { loadMemories, addMemory, deleteMemory, replaceMemories, defaultLabel, exportMemoriesJson, importMemoriesJson } = await import("../../html/memories.js");
 
 test("loadMemories returns [] when nothing is stored yet", () => {
   localStorage.clear();

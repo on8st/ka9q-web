@@ -39,7 +39,7 @@ class FakeOpusDecoder {
 }
 window["opus-decoder"] = { OpusDecoder: FakeOpusDecoder };
 
-const { createAudioPlayer, sliderToGain } = await import("../../html/instrument/audio.js");
+const { createAudioPlayer, sliderToGain } = await import("../../html/audio.js");
 
 test("sliderToGain maps [0,1] onto an over-unity [0,4] gain range", () => {
   assert.equal(sliderToGain(0), 0);

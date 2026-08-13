@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { OPUS_PT, PCM_PT_HINTS, decodeAudioFrame } from "../../html/instrument/audio-decode.js";
+import { OPUS_PT, PCM_PT_HINTS, decodeAudioFrame } from "../../html/audio-decode.js";
 
 function frameWithPt(pt, payloadBytes) {
   const buf = new ArrayBuffer(12 + payloadBytes.length);

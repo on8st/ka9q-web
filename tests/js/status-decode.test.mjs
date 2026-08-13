@@ -1,5 +1,5 @@
 // Port of tests/test_vhf_uhf_frontend_regression.py's field-level assertions,
-// for the JS decoder the instrument UI actually ships (html/instrument/
+// for the JS decoder the instrument UI actually ships (html/
 // status-decode.js). Same fixtures, same facts - this proves the JS port is
 // correct against the same real captured traffic, not just "looks similar
 // to the Python one." Uses Node's built-in test runner - no npm dependency,
@@ -25,7 +25,7 @@ import {
   asFloat64,
   asText,
   mergeChannelDataFields,
-} from "../../html/instrument/status-decode.js";
+} from "../../html/status-decode.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(__dirname, "..", "fixtures");

@@ -39,10 +39,10 @@ function walk(dir, exts) {
   return out;
 }
 
-const stockText = readFileSync(join(ROOT, "html/radio.html"), "utf8") + readFileSync(join(ROOT, "html/optionsDialog.html"), "utf8");
+const stockText = readFileSync(join(ROOT, "html/legacy/radio.html"), "utf8") + readFileSync(join(ROOT, "html/legacy/optionsDialog.html"), "utf8");
 const stockIds = idsIn(stockText);
 
-const instrumentFiles = walk(join(ROOT, "html/instrument"), [".html", ".js"]);
+const instrumentFiles = walk(join(ROOT, "html"), [".html", ".js"]).filter((f) => !f.includes(`${join(ROOT, "html/legacy")}`));
 const instrumentIds = new Set();
 for (const f of instrumentFiles) idsIn(readFileSync(f, "utf8")).forEach((id) => instrumentIds.add(id));
 
@@ -55,7 +55,7 @@ console.log("Parity check - stock ka9q-web features vs. the instrument UI\n");
 for (const entry of PARITY_MANIFEST) {
   const missingStockIds = entry.stockIds.filter((id) => !stockIds.has(id));
   if (missingStockIds.length > 0) {
-    console.log(`✗ MANIFEST ERROR: "${entry.feature}" claims stock id(s) [${missingStockIds.join(", ")}] that don't exist in html/radio.html or html/optionsDialog.html - manifest has drifted from reality.`);
+    console.log(`✗ MANIFEST ERROR: "${entry.feature}" claims stock id(s) [${missingStockIds.join(", ")}] that don't exist in html/legacy/radio.html or html/legacy/optionsDialog.html - manifest has drifted from reality.`);
     manifestErrors++;
     continue;
   }
@@ -65,7 +65,7 @@ for (const entry of PARITY_MANIFEST) {
     continue;
   }
   if (!instrumentIds.has(entry.instrumentId)) {
-    console.log(`✗ MANIFEST ERROR: "${entry.feature}" claims instrument id "${entry.instrumentId}" that doesn't exist anywhere under html/instrument/ - manifest has drifted from reality.`);
+    console.log(`✗ MANIFEST ERROR: "${entry.feature}" claims instrument id "${entry.instrumentId}" that doesn't exist anywhere under html/ (outside html/legacy/) - manifest has drifted from reality.`);
     manifestErrors++;
     continue;
   }

@@ -3787,7 +3787,10 @@ function setupSpectrumAvgInput() {
 }
 
 async function getVersion() {
-  const url = "version.json";
+  // Absolute: this page now lives under /legacy/, but the server route
+  // (onion_url_add(urls, "version.json", version) in ka9q-web.c) is only
+  // ever registered at the root, not per-directory.
+  const url = "/version.json";
   try {
     const response = await fetch(url);
     if (!response.ok) {

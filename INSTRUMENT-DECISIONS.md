@@ -49,6 +49,11 @@ receiver switcher, bookmarks) must use the full path. If this UI is ever
 promoted to be the default interface, that promotion is exactly the moment
 to revisit `ka9q-web.c`'s routes - not before.
 
+**Superseded 2026-08-13** - that promotion happened; see "Promoted to the
+default landing page, stock moved to `html/legacy/`" below. There is no
+`html/instrument/` any more and no `/instrument/index.html` URL - the
+instrument UI is now `html/index.html`, served at `/`.
+
 ## Discovery: startup-time script + Docker socket, not a live daemon (2026-08-10)
 
 `discovery/generate_instances.py` is the container's `ENTRYPOINT`. It runs
@@ -816,3 +821,59 @@ drawer's 9 options (matching the mockup's own scope exactly) rather than
 duplicating the fuller set, and the colormap picker is a plain `<select>`
 (consistent with the rest of this app's controls) rather than the
 mockup's gradient-swatch grid - a visual nicety, not a functional gap.
+
+## Promoted to the default landing page, stock moved to `html/legacy/` (2026-08-13)
+
+Requested directly: make this instrument UI the standard landing page at
+`/`, while keeping the stock UI reachable "for reference later" rather
+than deleted. This is the promotion the "/instrument/ is a directory
+listing" section above (2026-08-10) explicitly said would be "exactly the
+moment to revisit `ka9q-web.c`'s routes" - that moment arrived, so the
+byte-identical-C-server constraint from that section no longer applies to
+this one route.
+
+What moved, all via `git mv` (history preserved):
+- `html/instrument/*` -> `html/*`. The instrument UI's own files
+  (`app.js`, `band-edges.js`, etc.) no longer live in a subdirectory -
+  they *are* `html/` now.
+- `html/{radio.html,radio.js,spectrum.js,smeter.js,style.css,
+  optionsDialog.html,status.html}` -> `html/legacy/*`. The stock UI,
+  kept intact and fully functional, not archived-and-broken.
+- `colormap.js`, `pcm-player.js`, `opus-decoder.min.js` (shared by both
+  trees) stayed at `html/` root - `html/index.html` now references them
+  same-directory (no `../`); `html/legacy/radio.html` references them
+  one level up (`../colormap.js` etc., added).
+
+What had to change beyond the file moves, because both UI trees' own
+code (not just build tooling) hardcoded the old layout:
+- `ka9q-web.c`'s `home()`: the HTTP (non-websocket) root handler's
+  meta-refresh target changed from `radio.html` to `index.html`. This
+  *is* the C-server change the 2026-08-10 section above deferred.
+- `html/legacy/radio.js`'s `getVersion()` fetched `"version.json"` as a
+  page-relative URL - correct when the page was at `/radio.html`, silently
+  wrong once it moved to `/legacy/radio.html` (would have requested
+  `/legacy/version.json`, a path the server never registered). Made
+  absolute (`/version.json`) instead of relying on the page's own
+  directory depth.
+- `discovery/generate_instances.py`: `INSTANCES_JSON_PATH` dropped the
+  `/instrument` segment, and - the one with real runtime effect, not
+  just a file-location constant - the sibling-instance `url` it builds
+  for the cross-instance switcher changed from
+  `https://{host}/instrument/index.html` to `https://{host}/` (would
+  otherwise have linked every sibling at a URL that now redirects
+  through the meta-refresh an extra, pointless hop, or - if `/instrument`
+  is ever reused for something else later - to the wrong page entirely).
+- `tests/check-parity.mjs` / `tests/parity-manifest.mjs`: the stock-file
+  and instrument-file paths they read from disk to cross-check the
+  manifest against reality both updated (`html/radio.html` ->
+  `html/legacy/radio.html`, `html/instrument/` -> `html/` excluding
+  `html/legacy/`). Verified via the actual check (containerized Node,
+  this host has none) that the manifest still resolves the same 41
+  built / 2 pre-existing-and-unrelated manifest errors as before the
+  move - the move itself introduced zero new parity drift.
+
+Cross-repo consequence, not fixed here: `station/qth/sdr` (a separate
+repo, builds the three live production containers) has its own
+`images/ka9q-web/Dockerfile` writing `html/instrument/build-info.json`
+at image-build time - that path no longer exists post-move. Tracked and
+fixed as part of the same piece of work, but in that repo, not this one.

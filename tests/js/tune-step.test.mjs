@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyStep, fmtStep, STEP_OPTIONS_HZ, ALT_STEP_HZ, roundToNearestKhz } from "../../html/instrument/tune-step.js";
+import { applyStep, fmtStep, STEP_OPTIONS_HZ, ALT_STEP_HZ, roundToNearestKhz } from "../../html/tune-step.js";
 
 test("applyStep adds/subtracts the step and never goes negative", () => {
   assert.equal(applyStep(145_500_000, 1000, 1), 145_501_000);

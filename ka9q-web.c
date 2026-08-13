@@ -1787,7 +1787,8 @@ interface. When a client accesses the root URL of the server, this function is i
 client to the main radio interface or to establish a new WebSocket session.
 
 If the request is not a WebSocket upgrade, the function responds with a minimal HTML page that immediately
-redirects the client to `radio.html`, ensuring users are directed to the main application interface.
+redirects the client to `index.html` (the instrument UI, now the standard landing page - the stock UI remains
+available at `legacy/radio.html` for reference), ensuring users are directed to the main application interface.
 
 If the request is a WebSocket upgrade, the function creates a new session structure for the client, assigning
 it a unique SSRC (synchronization source identifier) and initializing session parameters such as frequency,
@@ -1822,7 +1823,7 @@ onion_connection_status home(void *data, onion_request * req,
         "<head>"
         "  <title>G0ORX Web SDR</title>"
         "  <meta charset=\"UTF-8\" />"
-        "  <meta http-equiv=\"refresh\" content=\"0; URL=radio.html\" />"
+        "  <meta http-equiv=\"refresh\" content=\"0; URL=index.html\" />"
         "</head>"
         "<body>"
         "</body>"

@@ -2,8 +2,8 @@
 // up and a down control, tuning by the amount shown. Choosing a different
 // step happens on the step itself." (design brief section 4)
 
-// Exactly the stock step options from html/radio.html's own <select> -
-// not invented.
+// Exactly the stock step options from html/legacy/radio.html's own
+// <select> - not invented.
 export const STEP_OPTIONS_HZ = [1, 10, 100, 250, 500, 1000, 5000, 9000, 10000, 100000, 1000000];
 
 // Steps to the next/previous point on the step grid, not a raw addition -

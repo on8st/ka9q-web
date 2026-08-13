@@ -1084,7 +1084,7 @@ function renderTelemetry() {
 // them), so rather than add a new server endpoint for this, the Docker
 // build writes the same commit hash it already captures for
 // /etc/ka9q-web-commit into a small static JSON file under
-// html/instrument/ too (see images/ka9q-web/Dockerfile) - the Makefile's
+// html/ too (see images/ka9q-web/Dockerfile) - the Makefile's
 // install rule (`cp -r html/.`) picks it up automatically, no server
 // change needed. Fetched once; a 404 (older image predating this) is
 // swallowed, the row just doesn't appear rather than showing an error.

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { modeForFrequency } from "../../html/instrument/mode-by-frequency.js";
+import { modeForFrequency } from "../../html/mode-by-frequency.js";
 
 test("modeForFrequency returns null (no override) above 30 MHz - never touches VHF/UHF", () => {
   assert.equal(modeForFrequency(145_500_000), null);

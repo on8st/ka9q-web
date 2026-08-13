@@ -10,8 +10,8 @@ globalThis.localStorage ??= (() => {
   };
 })();
 
-const { loadNotes, saveNotes } = await import("../../html/instrument/notes.js");
-const { spectrumToCsv } = await import("../../html/instrument/spectrum-export.js");
+const { loadNotes, saveNotes } = await import("../../html/notes.js");
+const { spectrumToCsv } = await import("../../html/spectrum-export.js");
 
 test("loadNotes returns empty string when nothing saved yet", () => {
   localStorage.clear();

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BAND_OPTIONS, bandsInCoverage } from "../../html/instrument/band-options.js";
+import { BAND_OPTIONS, bandsInCoverage } from "../../html/band-options.js";
 
 test("VHF coverage (144-146MHz) surfaces only 2M from the amateur list", () => {
   const bands = bandsInCoverage("amateur", 143_872_009, 146_128_009);

@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { decodeSpectrumFrame } from "../../html/instrument/spectrum-decode.js";
+import { decodeSpectrumFrame } from "../../html/spectrum-decode.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(__dirname, "..", "fixtures");
@@ -73,7 +73,7 @@ test("HF centerHz is exactly half the displayed span (0Hz-baseband direct sampli
 });
 
 test("if_power roughly cross-checks against the same fixture's Channel Data IF_POWER field", async () => {
-  const { decodeChannelDataFields, FIELD_IF_POWER, asFloat32 } = await import("../../html/instrument/status-decode.js");
+  const { decodeChannelDataFields, FIELD_IF_POWER, asFloat32 } = await import("../../html/status-decode.js");
   let channelIfPower = null;
   for (const frame of allFrames("vhf.bin")) {
     const fields = decodeChannelDataFields(frame);

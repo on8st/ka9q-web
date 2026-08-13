@@ -9,7 +9,7 @@ import {
   alphaForAveraging, emaStep, updateHoldValue,
   hzToBinIndex, interpolateDcSpike,
   niceGridStep, fmtAxisLabel,
-} from "../../html/instrument/spectrum-canvas.js";
+} from "../../html/spectrum-canvas.js";
 
 // Fake localStorage - a real empty store, not a global shim, since these
 // loaders take `storage` as an injectable parameter.

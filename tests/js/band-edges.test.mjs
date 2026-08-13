@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { HAM_BAND_EDGES, bandEdgesInSpan } from "../../html/instrument/band-edges.js";
+import { HAM_BAND_EDGES, bandEdgesInSpan } from "../../html/band-edges.js";
 
 test("HAM_BAND_EDGES has 18 bands, all with lowHz < highHz", () => {
   // Was 21 - 2026-08-13: the five US-channelized "60m ch1..ch5" entries

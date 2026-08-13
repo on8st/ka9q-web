@@ -17,9 +17,10 @@ const HEATMAP_STOPS = [
 ];
 
 // "Colormap selection" (stock: html/colormap.js's `colormaps` array,
-// selected via the `colormap` <select>). Reused as-is via a classic
-// <script> tag (html/instrument/index.html loads ../colormap.js) rather
-// than re-deriving ~2500 RGB triples by hand - `window.colormaps` is the
+// shared between both UI trees, selected via the `colormap` <select>).
+// Reused as-is via a classic <script> tag (html/index.html loads
+// colormap.js) rather than re-deriving ~2500 RGB triples by hand -
+// `window.colormaps` is the
 // same 10-entry array stock uses. Falls back to the built-in HEATMAP_STOPS
 // gradient below if that script hasn't loaded (defensive only; it always
 // does in the real deployed page).

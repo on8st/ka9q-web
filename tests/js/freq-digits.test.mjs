@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { digitsForFreq, stepFreqAtDigit, MAX_HZ, NUM_DIGITS, createDigitDisplay } from "../../html/instrument/freq-digits.js";
+import { digitsForFreq, stepFreqAtDigit, MAX_HZ, NUM_DIGITS, createDigitDisplay } from "../../html/freq-digits.js";
 
 test("digitsForFreq pads and splits correctly", () => {
   assert.deepEqual(digitsForFreq(145_500_000), [1, 4, 5, 5, 0, 0, 0, 0, 0]);

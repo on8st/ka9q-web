@@ -10,7 +10,7 @@ globalThis.localStorage ??= (() => {
   };
 })();
 
-const { dbToPercent, dbToNeedleDeg, createMeter, computeSnrDb, computeOvrRatio } = await import("../../html/instrument/meter.js");
+const { dbToPercent, dbToNeedleDeg, createMeter, computeSnrDb, computeOvrRatio } = await import("../../html/meter.js");
 
 // Range is S0..S9+60 (-127..-13dBm), stock's own S-meter reference for
 // this same field (BASEBAND_POWER) - see meter.js's header comment

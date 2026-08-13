@@ -3,7 +3,7 @@
 
 Runs once at container startup (see the Dockerfile ENTRYPOINT), before
 exec'ing the real ka9q-web binary, so startup isn't delayed by discovery -
-writes html/instrument/instances.json immediately with whatever's
+writes html/instances.json immediately with whatever's
 reachable at that moment, then execs the real binary with the original
 argv so it becomes PID 1.
 
@@ -57,7 +57,7 @@ from status_decode import (
 )
 
 DOCKER_SOCKET = "/var/run/docker.sock"
-INSTANCES_JSON_PATH = "/usr/local/share/ka9q-web/html/instrument/instances.json"
+INSTANCES_JSON_PATH = "/usr/local/share/ka9q-web/html/instances.json"
 HOSTNAME_MAP_PATH = os.path.join(os.path.dirname(__file__), "public-hostnames.json")
 REFRESH_INTERVAL_S = 30  # background --daemon re-run cadence
 FIELD_DESCRIPTION = 4
@@ -191,7 +191,7 @@ def generate():
             "lowHz": coverage["lowHz"],
             "highHz": coverage["highHz"],
             "url": (
-                f"https://{hostnames[sibling['port']]}/instrument/index.html"
+                f"https://{hostnames[sibling['port']]}/"
                 if sibling["port"] in hostnames else None
             ),
         })
