@@ -274,10 +274,25 @@ client.addEventListener("tunedFreq", (e) => applyTunedFreq(e.detail.hz));
 // (see the "frontend" listener below) - reported live (2026-08-13) that
 // opening the instrument UI should default to Full Band, not whatever a
 // reattached session happened to leave it on.
+//
+// tuneTo() alone does NOT move the spectrum window's centre - it only
+// retunes the VFO/demod passband (sends F:), a separate concept from the
+// wide spectrum view's own centre (server's sp->center_frequency).
+// zoomCenter() (Z:c:<khz>) is the actual "move the spectrum view here"
+// command - AZC (elsewhere in this file) already relies on exactly this
+// distinction, calling zoomCenter() explicitly after tuning rather than
+// assuming tuning does it. Missing that call here left setZoomLevel(0)'s
+// own default centre (0 Hz, not the coverage midpoint) in place - HF's
+// real ~0.015-30.456MHz coverage was displayed as -32..+32MHz around
+// that stale 0Hz centre (reported live 2026-08-13, easy to mistake for
+// the earlier left/right-swap bug at a glance, but a different mechanism
+// entirely - that one was a raw bin-order/decode issue, this is a
+// missing re-centre call).
 function goToFullBand() {
   client.setZoomLevel(0);
   const center = Math.round((currentCoverage.lowHz + currentCoverage.highHz) / 2);
   tuneTo(center);
+  client.zoomCenter(center);
 }
 
 // "Zoom to fit" - selecting a specific band chip should narrow the view
@@ -422,6 +437,14 @@ createValuePanel($("sgm-band"), (panel, close) => {
     // uses - correct for both "2M"/"70CM" (matches the chip's own label)
     // and e.g. a WWV quick-tune (not inside any specific ham band).
     tuneTo(hz);
+    // setZoomLevel() alone re-centres to ITS OWN default (0Hz), not this
+    // chip's frequency - explicit zoomCenter() needed here for the same
+    // reason goToFullBand() needs it (see that function's own comment).
+    // The subsequent zoomStep() calls inside driveZoomFit() do re-centre
+    // as part of their own normal operation, so this would eventually
+    // self-correct either way - but only after the first real frame,
+    // which would otherwise show the wrong (0Hz-centred) span briefly.
+    client.zoomCenter(hz);
     startZoomFit(targetSpanForChip(hz, bandCategory));
     close();
   });
