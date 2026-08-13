@@ -140,16 +140,17 @@ const meter = createMeter($("fe-power"));
 let lastInputSamprate = null;
 
 // "S-meter metric" (Signal/SNR/OVR) needs several independently-arriving
-// pieces (frontend's ifPowerDb, signalMetrics' basebandPowerDb/
-// noiseDensityDb/samplesSinceOver, filterEdges' bandwidth, and
-// inputSamprate from the spectrum stream) - re-render from whichever
-// arrived most recently each time any one of them updates.
+// pieces (signalMetrics' basebandPowerDb/noiseDensityDb/samplesSinceOver,
+// filterEdges' bandwidth, and inputSamprate from the spectrum stream) -
+// re-render from whichever arrived most recently each time any one of
+// them updates. Signal and SNR both key off basebandPowerDb now (issue
+// 5, see meter.js's header comment) - frontend's ifPowerDb (front-end-
+// wide IF power, not tied to any specific tuned channel) is no longer
+// read here at all.
 function renderMeterNow() {
-  const fe = client.frontend;
   const sm = client.signalMetrics;
   const edges = client.filterEdges;
   meter.render({
-    ifPowerDb: fe ? fe.ifPowerDb : null,
     basebandPowerDb: sm ? sm.basebandPowerDb : null,
     noiseDensityDb: sm ? sm.noiseDensityDb : null,
     bandwidthHz: edges ? Math.abs(edges.highHz - edges.lowHz) : null,

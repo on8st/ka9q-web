@@ -12,18 +12,22 @@ globalThis.localStorage ??= (() => {
 
 const { dbToPercent, dbToNeedleDeg, createMeter, computeSnrDb, computeOvrRatio } = await import("../../html/instrument/meter.js");
 
+// Range is S0..S9+60 (-127..-13dBm), stock's own S-meter reference for
+// this same field (BASEBAND_POWER) - see meter.js's header comment
+// (issue 5, fixed 2026-08-13: Signal used to read a different field,
+// IF_POWER, calibrated -80..0dB for THAT field's typical range).
 test("dbToPercent clamps to [0, 100] and is linear in between", () => {
-  assert.equal(dbToPercent(-80), 0);
-  assert.equal(dbToPercent(0), 100);
-  assert.equal(dbToPercent(-40), 50);
+  assert.equal(dbToPercent(-127), 0);
+  assert.equal(dbToPercent(-13), 100);
+  assert.equal(dbToPercent(-70), 50);
   assert.equal(dbToPercent(-1000), 0); // clamp below range
   assert.equal(dbToPercent(1000), 100); // clamp above range
 });
 
 test("dbToNeedleDeg maps the same range to [-60, 60] degrees", () => {
-  assert.equal(dbToNeedleDeg(-80), -60);
-  assert.equal(dbToNeedleDeg(0), 60);
-  assert.equal(dbToNeedleDeg(-40), 0);
+  assert.equal(dbToNeedleDeg(-127), -60);
+  assert.equal(dbToNeedleDeg(-13), 60);
+  assert.equal(dbToNeedleDeg(-70), 0);
 });
 
 // Minimal DOM stub - just enough for createMeter's innerHTML usage,
@@ -37,7 +41,7 @@ test("createMeter defaults to bar style and renders a fill width", () => {
   const el = fakeContainer();
   const meter = createMeter(el);
   assert.equal(meter.getStyle(), "bar");
-  meter.render(-40);
+  meter.render(-70); // midpoint of the S0..S9+60 range -> 50%
   // .minibar/<i> - the only bar markup with real CSS behind it (see
   // meter.js's renderBar() header comment: the old .meter-bar-fill
   // classes had no matching CSS anywhere, rendering invisible).
@@ -119,7 +123,7 @@ test("render() with SNR metric selected but missing inputs shows a placeholder, 
   const el = fakeContainer();
   const meter = createMeter(el);
   meter.setMetric("snr");
-  meter.render({ ifPowerDb: -40 }); // only Signal's field present, not SNR's
+  meter.render({ basebandPowerDb: -40 }); // Signal's field present but SNR's other two inputs (noiseDensityDb/bandwidthHz) aren't
   assert.equal(el.innerHTML, "—");
 });
 
@@ -132,11 +136,11 @@ test("render() with OVR metric selected computes from inputSamprate/samplesSince
   assert.match(el.innerHTML, /width:100\.0%/); // 1 second since over -> full scale
 });
 
-test("render(-40) (the pre-existing plain-number call shape) still works as Signal", () => {
+test("render(-70) (the pre-existing plain-number call shape) still works as Signal", () => {
   localStorage.clear();
   const el = fakeContainer();
   const meter = createMeter(el);
-  meter.render(-40);
+  meter.render(-70);
   assert.match(el.innerHTML, /width:50\.0%/);
 });
 
@@ -145,8 +149,16 @@ test("render(-40) (the pre-existing plain-number call shape) still works as Sign
 // similarly OVR, if inputSamprate/samplesSinceOver are never populated)
 // can be permanently invalid there, and since the metric choice persists
 // via localStorage, the meter would otherwise stay on "—" forever with no
-// way back short of clearing storage. "signal" is the one metric that's
-// always valid once any frontend/spectrum data has arrived at all.
+// way back short of clearing storage. Signal is still the fallback
+// target - it's the metric an operator is most likely to actually want
+// to see, and it needs only one of the three fields SNR needs
+// (basebandPowerDb, without noiseDensityDb/bandwidthHz) - but as of
+// issue 5's fix it's no longer GUARANTEED valid the way it used to be
+// (it used to read a separate, near-universal field, ifPowerDb, that
+// wasn't actually the right value to show - see meter.js's header
+// comment); on a station where BASEBAND_POWER is genuinely never
+// populated, Signal correctly shows "—" too now, since there's no real
+// channel-power reading to show it.
 test("meter falls back from SNR to Signal after being invalid for a sustained period", () => {
   localStorage.clear();
   const el = fakeContainer();
@@ -158,7 +170,7 @@ test("meter falls back from SNR to Signal after being invalid for a sustained pe
     meter.setMetric("snr"); // no data yet - starts the invalid streak
     assert.equal(meter.getMetric(), "snr"); // not yet - streak just started
     now += 5001; // past the fallback threshold
-    meter.render({ ifPowerDb: -40 }); // still no SNR inputs; Signal's ifPowerDb present
+    meter.render({ basebandPowerDb: -70 }); // still no SNR inputs; Signal's basebandPowerDb present
     assert.equal(meter.getMetric(), "signal"); // fell back
     assert.match(el.innerHTML, /width:50\.0%/); // and immediately shows a real reading
   } finally {

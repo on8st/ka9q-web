@@ -2,12 +2,19 @@
 // analog meter changes what is shown in the control block itself. A
 // settings panel holds the choice, never a second meter." (brief section 4)
 //
-// IF_POWER's real range isn't a documented protocol fact - -80..0 dB is a
-// presentational choice (comfortably spans what's been observed live,
-// roughly -37dB on a quiet 2m channel) picked for a readable meter, not
-// read from anywhere. Adjust if real-world readings clip against it.
-const MIN_DB = -80;
-const MAX_DB = 0;
+// S0..S9+60, the same reference stock's own S-meter uses (html/smeter.js:
+// "S0 = -127dBm, S9 = -73dBm, S9+60 = -13dBm" - not a documented protocol
+// fact either, just stock's own established convention, reused here so
+// this UI's Signal reading lines up with what an operator already knows
+// from stock). Confirmed live 2026-08-13 this is the right scale for the
+// field actually used now (BASEBAND_POWER, see percentForMetric() below) -
+// -80..0 was calibrated for a different, wrong field (IF_POWER, see issue
+// 5's writeup in the station repo's docs/ISSUES.md) and real
+// BASEBAND_POWER readings (-99 to -107dB on a quiet channel, captured
+// live on all three instances) would have pinned the bar at 0% the whole
+// time against that old range.
+const MIN_DB = -127;
+const MAX_DB = -13;
 const MIN_NEEDLE_DEG = -60;
 const MAX_NEEDLE_DEG = 60;
 const STORAGE_KEY = "instrument_meter_style";
@@ -23,9 +30,20 @@ export function dbToNeedleDeg(db, minDeg = MIN_NEEDLE_DEG, maxDeg = MAX_NEEDLE_D
 }
 
 // "S-meter metric" (stock: the `meter` <select>, Signal/SNR/OVR) - ported
-// from html/smeter.js's updateSMeter(). Signal reuses the existing
-// ifPowerDb path unchanged; SNR and OVR are new math over fields this UI
-// didn't previously decode (ws-client.js's signalMetrics/filterEdges).
+// from html/smeter.js's updateSMeter(). SNR and OVR are new math over
+// fields this UI didn't previously decode (ws-client.js's
+// signalMetrics/filterEdges). Signal was ORIGINALLY wired to ifPowerDb
+// (frontend's wideband IF power) on the assumption that was a drop-in
+// port of stock's SignalLevel - wrong: stock's updateSMeter() is actually
+// called with `power`, decoded from the BASEBAND_POWER field (case 46,
+// html/radio.js), the tuned CHANNEL's own demodulated power - not
+// IF_POWER (case 45), a completely different, front-end-wide field that
+// doesn't change with tuning at all. Confirmed live 2026-08-13 (reported:
+// "when set to signal, it remains a fixed value, independent of
+// tuning" - station repo docs/ISSUES.md issue 5): ifPowerDb genuinely IS
+// static across re-tunes, since it's not tied to any specific channel.
+// Fixed to use signalMetrics' basebandPowerDb (same field SNR already
+// used) - see percentForMetric() below.
 export const SNR_MIN_DB = -10;
 export const SNR_MAX_DB = 50;
 
@@ -100,17 +118,17 @@ function percentForMetric(metric, values) {
     if (!Number.isFinite(inputSamprate) || !Number.isFinite(samplesSinceOver)) return { valid: false };
     return { valid: true, percent: computeOvrRatio(inputSamprate, samplesSinceOver) * 100 };
   }
-  if (!Number.isFinite(values.ifPowerDb)) return { valid: false };
-  return { valid: true, percent: dbToPercent(values.ifPowerDb) };
+  if (!Number.isFinite(values.basebandPowerDb)) return { valid: false };
+  return { valid: true, percent: dbToPercent(values.basebandPowerDb) };
 }
 
 /** Manages which meter style AND metric are shown, both persisted across
  * reloads - only one meter, showing one metric, is ever in the DOM at
  * once (brief: "never a second meter"). render() accepts either a plain
- * dB number (shorthand for {ifPowerDb: db}, the pre-existing call shape)
- * or a values object carrying whichever of ifPowerDb/basebandPowerDb/
- * noiseDensityDb/bandwidthHz/inputSamprate/samplesSinceOver the current
- * metric needs. */
+ * dB number (shorthand for {basebandPowerDb: db}, the pre-existing call
+ * shape) or a values object carrying whichever of
+ * basebandPowerDb/noiseDensityDb/bandwidthHz/inputSamprate/
+ * samplesSinceOver the current metric needs. */
 // If the selected metric (SNR/OVR) stays invalid this long, fall back to
 // "signal" - confirmed live that some stations never populate
 // BASEBAND_POWER/NOISE_DENSITY (arrive as zero-length fields, decoding to
@@ -118,11 +136,21 @@ function percentForMetric(metric, values) {
 // meter style, so a metric choice persisted from an earlier session (or
 // a station where it once worked) can leave the meter reading "—"
 // forever with no way back to a working state short of clearing
-// localStorage. "signal" always has a value once any frontend/spectrum
-// data has arrived at all, so it's the one metric always safe to fall
-// back to. 5s is long enough to not misfire on a brief startup gap
-// (page load, mode/frequency change) before the first real reading
-// arrives, short enough that the meter doesn't sit blank for long.
+// localStorage. Signal now shares BASEBAND_POWER with SNR (see the
+// header comment above) rather than the separate, near-universal
+// IF_POWER field it used before fixing issue 5 - on a station where
+// BASEBAND_POWER is genuinely never populated, Signal can no longer
+// paper over that the way it used to, but there is no better metric to
+// fall back to in that case either (SNR/OVR need adjacent fields from
+// the same channel-data source); showing "—" there is now an honest
+// "no data", not a bug. This mechanism still matters for the common
+// case: an operator's persisted metric choice being SNR/OVR on a session
+// where filter edges or an overrange count just haven't arrived yet,
+// which self-resolves back to Signal (which almost always has real data
+// once the channel is up) within 5s. 5s is long enough to not misfire on
+// a brief startup gap (page load, mode/frequency change) before the
+// first real reading arrives, short enough that the meter doesn't sit
+// blank for long.
 const FALLBACK_METRIC = "signal";
 const INVALID_FALLBACK_MS = 5000;
 
@@ -133,7 +161,7 @@ export function createMeter(container) {
   let invalidSinceMs = null; // when the current metric first went invalid, or null while valid/unknown
 
   function render(dbOrValues) {
-    lastValues = (typeof dbOrValues === "number") ? { ifPowerDb: dbOrValues } : (dbOrValues || {});
+    lastValues = (typeof dbOrValues === "number") ? { basebandPowerDb: dbOrValues } : (dbOrValues || {});
     const { valid, percent } = percentForMetric(metric, lastValues);
     if (!valid) {
       container.innerHTML = "—";

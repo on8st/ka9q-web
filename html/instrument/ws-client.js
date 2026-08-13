@@ -266,9 +266,12 @@ export class Ka9qWebClient extends EventTarget {
       };
       this.dispatchEvent(new CustomEvent("filterEdges", { detail: this.filterEdges }));
     }
-    // Raw inputs for the "S-meter metric" feature's SNR/OVR options
-    // (Signal itself already comes from the spectrum stream's ifPowerDb -
-    // these two are demod-specific, Channel-Data-only).
+    // Raw inputs for the "S-meter metric" feature's Signal/SNR options -
+    // Signal itself also comes from basebandPowerDb now (issue 5: it was
+    // wired to `frontend`'s ifPowerDb, a front-end-wide field that
+    // doesn't track the tuned channel at all - see meter.js's header
+    // comment), noiseDensityDb/samplesSinceOver are SNR/OVR-specific.
+    // All demod-specific, Channel-Data-only.
     if (this._fields.has(FIELD_BASEBAND_POWER) || this._fields.has(FIELD_NOISE_DENSITY) || this._fields.has(FIELD_SAMPLES_SINCE_OVER)) {
       this.signalMetrics = {
         basebandPowerDb: this._fields.has(FIELD_BASEBAND_POWER) ? asDbFromLinearPower(this._fields.get(FIELD_BASEBAND_POWER)) : null,
