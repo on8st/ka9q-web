@@ -455,6 +455,23 @@ client.addEventListener("frontend", (e) => {
       setTimeout(goToFullBand, 2000);
       fetchWwvSolar();
       setInterval(fetchWwvSolar, 60 * 60 * 1000); // matches stock's own refresh interval
+    } else {
+      // Narrowband receivers (VHF/UHF): every fresh client connection gets
+      // a generic server-side default channel - confirmed live (2026-08-13,
+      // headless-Chromium/CDP capturing the real BFREQ echo) to be a
+      // hardcoded 10MHz on ALL THREE instances (HF, VHF, UHF alike),
+      // regardless of front end. 10MHz is a plausible HF frequency (WWV10)
+      // so this was invisible there, but it falls completely outside
+      // VHF's real ~144-146MHz and UHF's real ~431-440MHz coverage -
+      // bandForFrequency() correctly finds no match, so the BAND segment
+      // fell back to its "FULL BAND" label and nothing ever retuned away
+      // from it afterward (reported live three times as "still shows FULL
+      // BAND"). Unlike HF, these receivers have no "Full Band" concept at
+      // all (their whole coverage already fits inside one real ham band -
+      // reported live 2026-08-13), so this retunes once to the coverage
+      // midpoint itself rather than reusing goToFullBand()'s zoom-level-0
+      // framing.
+      tuneTo(coverageMidpointHz());
     }
   }
 });
@@ -532,9 +549,13 @@ client.addEventListener("tunedFreq", (e) => applyTunedFreq(e.detail.hz));
 // the earlier left/right-swap bug at a glance, but a different mechanism
 // entirely - that one was a raw bin-order/decode issue, this is a
 // missing re-centre call).
+function coverageMidpointHz() {
+  return Math.round((currentCoverage.lowHz + currentCoverage.highHz) / 2);
+}
+
 function goToFullBand() {
   client.setZoomLevel(0);
-  const center = Math.round((currentCoverage.lowHz + currentCoverage.highHz) / 2);
+  const center = coverageMidpointHz();
   tuneTo(center);
   client.zoomCenter(center);
 }
