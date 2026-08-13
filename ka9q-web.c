@@ -1185,6 +1185,8 @@ void websocket_closed(struct session *sp) {
 // symmetric approximation only if a front end driver somehow never sets
 // them (defensive; not expected to trigger with rtlsdr.c or airspy.c).
 static void frontend_if_bounds(double *lo_if, double *hi_if){
+  fprintf(stderr, "DIAGNOSTIC frontend_if_bounds: min_IF=%f max_IF=%f isnan(min)=%d isnan(max)=%d samprate=%f\n",
+          Frontend.min_IF, Frontend.max_IF, isnan(Frontend.min_IF), isnan(Frontend.max_IF), Frontend.samprate);
   if(!isnan(Frontend.min_IF) && !isnan(Frontend.max_IF) && Frontend.max_IF > Frontend.min_IF){
     *lo_if = Frontend.min_IF;
     *hi_if = Frontend.max_IF;
