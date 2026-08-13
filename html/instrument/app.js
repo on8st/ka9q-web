@@ -87,6 +87,7 @@ client.addEventListener("spectrum", (e) => {
   spectrumDisplay.render(e.detail);
   lastInputSamprate = e.detail.inputSamprate;
   renderMeterNow(); // OVR decays moment-to-moment - refresh every frame, not just on frontend/signalMetrics updates
+  driveZoomFit(e.detail);
 });
 client.addEventListener("signalMetrics", () => renderMeterNow());
 client.addEventListener("filterEdges", () => renderMeterNow());
@@ -182,6 +183,7 @@ createValuePanel($("sgm-audio"), (panel, close) => {
 });
 
 // ---- Frontend telemetry -> ident badge, coverage, meter, band chips ----
+let hasSetInitialView = false;
 client.addEventListener("frontend", (e) => {
   const fe = e.detail;
   frontendFrequencyHz = fe.frequencyHz || 0;
@@ -191,6 +193,17 @@ client.addEventListener("frontend", (e) => {
   renderMeterNow();
   updateSelfEntry(fe);
   renderBandCategories();
+  // Default the view to Full Band on open, once, the first time real
+  // coverage is known - reported live (2026-08-13) that opening the
+  // instrument UI (HF in particular, where "full band" vs. "one specific
+  // band" is a meaningful, common distinction) should default to Full
+  // Band rather than whatever a reattached session happened to leave it
+  // on. Guarded so later "frontend" updates (this fires repeatedly as
+  // telemetry streams in) don't keep resetting the view mid-session.
+  if (!hasSetInitialView && currentCoverage.highHz > currentCoverage.lowHz) {
+    hasSetInitialView = true;
+    goToFullBand();
+  }
 });
 
 // ---- Frequency digits + step spinner ----
@@ -233,6 +246,63 @@ function tuneTo(hz) {
 }
 
 client.addEventListener("tunedFreq", (e) => applyTunedFreq(e.detail.hz));
+
+// "Full Band" - widest zoom-table entry (index 0), centred on the
+// receiver's actual coverage midpoint. Factored out so it can be reused
+// both by the Band popup's "Full" chip and as the default initial view
+// (see the "frontend" listener below) - reported live (2026-08-13) that
+// opening the instrument UI should default to Full Band, not whatever a
+// reattached session happened to leave it on.
+function goToFullBand() {
+  client.setZoomLevel(0);
+  const center = Math.round((currentCoverage.lowHz + currentCoverage.highHz) / 2);
+  tuneTo(center);
+}
+
+// "Zoom to fit" - selecting a specific band chip should narrow the view
+// to roughly that band's real width, not leave whatever much-wider span
+// was already showing (reported live 2026-08-13, same report as the
+// Full-Band-on-open fix above). Zoom levels are discrete indices into
+// the server's own zoom_table[] (ws-client.js's setZoomLevel()/
+// zoomStep()) - there is no direct "set span to N Hz" command - so this
+// works by stepping zoomStep(+1, ...) one level at a time and watching
+// each real spectrum frame's own reported span (binWidthHz * binCount)
+// until it's at or under the target, the same one-step-per-real-frame
+// pacing used elsewhere in this file (e.g. the waterfall's own render
+// cadence) rather than flooding the server with commands faster than it
+// can reply. driveZoomFit() is called from the main "spectrum" listener
+// below, once per real frame.
+let zoomFitTarget = null; // { spanHz, stepsLeft } while a fit is in progress
+const ZOOM_FIT_MAX_STEPS = 20; // safety cap - a zoom table has a real max index; without this a target narrower than the table's finest step would spin forever
+
+function startZoomFit(spanHz) {
+  zoomFitTarget = { spanHz, stepsLeft: ZOOM_FIT_MAX_STEPS };
+}
+
+function driveZoomFit(spectrum) {
+  if (!zoomFitTarget) return;
+  const currentSpanHz = spectrum.binWidthHz * spectrum.binCount;
+  if (currentSpanHz <= zoomFitTarget.spanHz || zoomFitTarget.stepsLeft <= 0) {
+    zoomFitTarget = null;
+    return;
+  }
+  zoomFitTarget.stepsLeft--;
+  client.zoomStep(1, currentFreqHz ?? spectrum.centerHz);
+}
+
+// Target span for a band chip's zoom-to-fit: real ham-band edges when the
+// chip's frequency falls inside one (band-edges.js's HAM_BAND_EDGES -
+// exact, the same table "Show ham band edge markers" already draws from),
+// a tight fixed span for a single-carrier utility chip (WWV etc. - there
+// is no real "width" to zoom to, just a workable close-in view), or a
+// moderate fixed span for a broadcast-band chip (no edges table for
+// those yet).
+function targetSpanForChip(freqHz, category) {
+  const band = bandForFrequency(freqHz);
+  if (band) return (band.highHz - band.lowHz) * 1.15; // real edges + a little headroom so they're not flush against the panel edge
+  if (category === "utility") return 20_000;
+  return 300_000;
+}
 
 $("step-value").textContent = fmtStep(stepHz);
 $("step-up").addEventListener("click", () => {
@@ -297,16 +367,11 @@ createValuePanel($("sgm-band"), (panel, close) => {
     </div>`;
   panel.querySelector("#band-cats").addEventListener("click", (e) => {
     if (e.target.dataset.full) {
-      // "Full" isn't a named band - it's a reset-the-view action: widest
-      // zoom-table entry (index 0, same convention as the drawer's zoom
-      // slider) centred on the receiver's actual coverage midpoint. That
-      // midpoint deliberately isn't inside any HAM_BAND_EDGES entry for a
-      // wideband front end (HF), so the BAND segment's existing "FULL
-      // BAND" fallback label (applyTunedFreq(), bandForFrequency() ->
-      // null) picks it up immediately via tuneTo()'s optimistic update.
-      client.setZoomLevel(0);
-      const center = Math.round((currentCoverage.lowHz + currentCoverage.highHz) / 2);
-      tuneTo(center);
+      // "Full" isn't a named band - it's a reset-the-view action. BAND
+      // segment's "FULL BAND" fallback label (applyTunedFreq(),
+      // bandForFrequency() -> null) picks it up immediately via
+      // tuneTo()'s optimistic update.
+      goToFullBand();
       close();
       return;
     }
@@ -319,11 +384,24 @@ createValuePanel($("sgm-band"), (panel, close) => {
   panel.querySelector("#band-chips").addEventListener("click", (e) => {
     const freq = e.target.dataset.freq;
     if (!freq) return;
+    const hz = Number(freq);
+    // Reset to the widest zoom level first, then narrow back in to fit
+    // this band's real width (startZoomFit()/driveZoomFit() above) -
+    // guarantees a deterministic result regardless of whatever zoom
+    // level was active before picking this chip. zoomStep() only ever
+    // narrows, so starting from anywhere already narrower than the
+    // target would leave the view too tight instead of fitting the
+    // newly-selected band (reported live 2026-08-13: selecting a band
+    // left the view "much wider than that" - the old code never
+    // adjusted zoom at all, just tuned within whatever span was already
+    // showing).
+    client.setZoomLevel(0);
     // v-band and mode both come from tuneTo()'s optimistic applyTunedFreq()
     // call now, the same single source of truth the real tunedFreq echo
     // uses - correct for both "2M"/"70CM" (matches the chip's own label)
     // and e.g. a WWV quick-tune (not inside any specific ham band).
-    tuneTo(Number(freq));
+    tuneTo(hz);
+    startZoomFit(targetSpanForChip(hz, bandCategory));
     close();
   });
 });
