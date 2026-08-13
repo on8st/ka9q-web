@@ -724,6 +724,23 @@ struct zoom_table_t {
 const struct zoom_table_t zoom_table[] = {
   {40000, 1620},
   {20000, 1620},
+  // 18790 Hz added: gives 30,439,800 Hz (bin_width * 1620), the closest
+  // achievable step to this station's HF front end (RX888, direct
+  // sampling) real coverage without exceeding it - confirmed live via
+  // frontend_if_bounds() (Frontend.min_IF=15000, Frontend.max_IF=
+  // 30,456,000, a 30,441,000 Hz window) and cross-checked against the
+  // client's own reported real coverage (0.015-30.456 MHz). Without
+  // this, zoom level 0 (level=0, {40000,1620}=64.8MHz, and level=1,
+  // {20000,1620}=32.4MHz) both exceeded the real window and got skipped
+  // by zoom_to()'s while loop, which fell all the way through to the
+  // next entry that fit - {10000,1620}=16.2MHz - showing barely half of
+  // HF's real coverage under a "Full Band" request (issue 17, station
+  // repo docs/ISSUES.md, found 2026-08-13). Same reasoning as the 5432Hz
+  // and 1480Hz entries below for Airspy/VHF - this table has no
+  // per-front-end awareness beyond "pick the widest entry from here that
+  // still fits", so gaps like this one show up as a front end's real
+  // coverage falling between two existing steps.
+  {18790, 1620},
   {10000, 1620},
   {8000, 1620},
   // 5432 Hz added: gives 8,799,840 Hz (bin_width * 1620), the closest
