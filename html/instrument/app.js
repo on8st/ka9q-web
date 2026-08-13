@@ -155,6 +155,29 @@ function updateCursorReadout() {
   }
 }
 
+// ---- Zoom-span transient popup - ported from stock's zoom_bw_popup
+// (html/radio.js), simplified to a single reactive trigger: stock shows
+// it both from zoomin()/zoomout()'s own optimistic pre-update AND from
+// the server's z_level echo; this UI has no local zoom-table copy to
+// compute an optimistic span from, so it relies solely on the real
+// spectrum frame's own zoomLevel/binWidthHz/binCount - at the default
+// 100ms poll rate that's still effectively instant, and it uniformly
+// covers every way the zoom level can change (buttons, drawer slider,
+// even another client), not just this UI's own buttons. ----
+const zoomPopup = $("zoom-popup");
+let lastShownZoomLevel = null;
+let zoomPopupHideTimer = null;
+function noteZoomLevel(detail) {
+  if (detail.zoomLevel === lastShownZoomLevel) return;
+  lastShownZoomLevel = detail.zoomLevel;
+  const spanHz = detail.binWidthHz * detail.binCount;
+  const label = spanHz >= 1_000_000 ? `${(spanHz / 1e6).toFixed(2)} MHz` : `${(spanHz / 1e3).toFixed(1)} kHz`;
+  zoomPopup.textContent = label;
+  zoomPopup.classList.add("show");
+  if (zoomPopupHideTimer) clearTimeout(zoomPopupHideTimer);
+  zoomPopupHideTimer = setTimeout(() => zoomPopup.classList.remove("show"), 900);
+}
+
 client.addEventListener("spectrum", (e) => {
   // centerHz is already absolute RF Hz (sp->center_frequency, server-
   // side - see ka9q-web.c's session-init comment and PROTOCOL-SPECTRUM.md).
@@ -168,6 +191,7 @@ client.addEventListener("spectrum", (e) => {
   renderMeterNow(); // OVR decays moment-to-moment - refresh every frame, not just on frontend/signalMetrics updates
   driveZoomFit(e.detail);
   updateCursorReadout();
+  noteZoomLevel(e.detail);
 });
 client.addEventListener("signalMetrics", () => renderMeterNow());
 client.addEventListener("filterEdges", () => renderMeterNow());
@@ -356,7 +380,11 @@ client.addEventListener("frontend", (e) => {
   // the underlying race (out of scope for a client-only change).
   if (!hasSetInitialView && currentCoverage.highHz > currentCoverage.lowHz) {
     hasSetInitialView = true;
-    if (isWidebandCoverage()) setTimeout(goToFullBand, 2000);
+    if (isWidebandCoverage()) {
+      setTimeout(goToFullBand, 2000);
+      fetchWwvSolar();
+      setInterval(fetchWwvSolar, 60 * 60 * 1000); // matches stock's own refresh interval
+    }
   }
 });
 
@@ -940,7 +968,8 @@ function renderTelemetry() {
     <div><span>ADC overs</span><span>${s.adOver}</span></div>
     <div><span>Zoom level</span><span>${s.zoomLevel}</span></div>
   ` : `<div><span>Telemetry</span><span>not yet received</span></div>`)
-    + (buildCommit ? `<div><span>Build</span><span>${buildCommit.slice(0, 8)}</span></div>` : "");
+    + (buildCommit ? `<div><span>Build</span><span>${buildCommit.slice(0, 8)}</span></div>` : "")
+    + (wwvSolarText ? `<div><span>WWV solar</span><span>${wwvSolarText}</span></div>` : "");
 }
 
 // ---- Build/version info - the drawer had no way to tell which build is
@@ -960,7 +989,47 @@ fetch("build-info.json").then((r) => (r.ok ? r.json() : null)).then((d) => {
   if (d && d.commit) { buildCommit = d.commit; renderTelemetry(); }
 }).catch(() => {});
 
+// ---- WWV solar data - HF-only (gated the same way the Full Band chip
+// is: isWidebandCoverage(), not a front-end name check), ported from
+// stock's fetchAndDisplayWWVSolarData() including its regexes and hourly
+// refresh interval - swpc.noaa.gov sets Access-Control-Allow-Origin: *
+// (confirmed live), so this works as a direct browser fetch exactly like
+// stock's does, no proxy needed. ----
+const WWV_URL = "https://services.swpc.noaa.gov/text/wwv.txt";
+let wwvSolarText = null;
+function fetchWwvSolar() {
+  fetch(WWV_URL).then((r) => r.text()).then((text) => {
+    const flux = text.match(/Solar flux (\d+)/)?.[1] ?? "N/A";
+    const a = text.match(/A-index (\d+)/)?.[1] ?? "N/A";
+    const k = text.match(/K-index.*?was ([\d.]+)/)?.[1] ?? "N/A";
+    wwvSolarText = `Flux ${flux} · A ${a} · K ${k}`;
+    renderTelemetry();
+  }).catch(() => {
+    wwvSolarText = "unavailable";
+    renderTelemetry();
+  });
+}
+
 $("pause-toggle").addEventListener("change", (e) => spectrumDisplay.setPaused(e.target.checked));
+
+// ---- Keyboard: Space to pause/resume the spectrum - the one shortcut
+// from stock's ~14-shortcut set (html/radio.js's spectrum.onKeypress)
+// worth carrying over on its own merits: it's the one people reach for
+// by muscle memory, and every other stock shortcut either needs
+// fullscreen (which this UI doesn't have) or just duplicates a button
+// that's already one click away. Guarded against text-input focus, same
+// as stock's own guard, so typing a space into Notes/filter-edges/etc.
+// doesn't pause the spectrum as a side effect. ----
+document.addEventListener("keydown", (e) => {
+  if (e.code !== "Space" && e.key !== " ") return;
+  const t = e.target;
+  const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+  if (typing) return;
+  e.preventDefault();
+  const next = !spectrumDisplay.isPaused();
+  spectrumDisplay.setPaused(next);
+  $("pause-toggle").checked = next;
+});
 function exportSpectrumCsv() {
   const current = spectrumDisplay.getLastSpectrum();
   if (!current) return;
