@@ -31,6 +31,14 @@ function fmtMHz(hz) {
   return (hz / 1e6).toFixed(3);
 }
 
+// Whole-MHz range label for the "zoom out to everything" chip (e.g. "0-31MHz"
+// for HF's real ~0.015-30.456 MHz coverage) - rounded rather than fmtMHz()'s
+// 3-decimal precision, matching the short, glanceable style of the other
+// band chips ("20M", "WWV10") instead of a fussy exact-edge readout.
+function fmtWholeMHzRange(lowHz, highHz) {
+  return `${Math.floor(lowHz / 1e6)}-${Math.ceil(highHz / 1e6)}MHz`;
+}
+
 const client = new Ka9qWebClient(
   (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/",
 ).connect();
@@ -182,6 +190,17 @@ createValuePanel($("sgm-audio"), (panel, close) => {
   });
 });
 
+// A "zoom out to everything" option only means something distinct from
+// "zoom out to my one band" when the receiver's real coverage spans
+// multiple ham bands - true for HF (~30 MHz, 0.015-30.456 MHz here) but
+// not VHF/UHF (2m ~4 MHz, 70cm ~8.8 MHz - already effectively one band).
+// Threshold, not a front-end name check, so it stays correct if a future
+// front end's coverage changes rather than hardcoding "HF" specifically.
+const WIDEBAND_COVERAGE_MIN_HZ = 10_000_000;
+function isWidebandCoverage() {
+  return currentCoverage.highHz - currentCoverage.lowHz > WIDEBAND_COVERAGE_MIN_HZ;
+}
+
 // ---- Frontend telemetry -> ident badge, coverage, meter, band chips ----
 let hasSetInitialView = false;
 client.addEventListener("frontend", (e) => {
@@ -199,10 +218,12 @@ client.addEventListener("frontend", (e) => {
   // band" is a meaningful, common distinction) should default to Full
   // Band rather than whatever a reattached session happened to leave it
   // on. Guarded so later "frontend" updates (this fires repeatedly as
-  // telemetry streams in) don't keep resetting the view mid-session.
+  // telemetry streams in) don't keep resetting the view mid-session, and
+  // restricted to wideband coverage (HF) - VHF/UHF never had this forced
+  // reset before today and shouldn't gain it as a side effect.
   if (!hasSetInitialView && currentCoverage.highHz > currentCoverage.lowHz) {
     hasSetInitialView = true;
-    goToFullBand();
+    if (isWidebandCoverage()) goToFullBand();
   }
 });
 
@@ -360,7 +381,7 @@ createValuePanel($("sgm-band"), (panel, close) => {
     <div class="pop-head"><span>Band</span><span>coverage ${fmtMHz(currentCoverage.lowHz)}–${fmtMHz(currentCoverage.highHz)} MHz</span></div>
     <div class="pop-body">
       <div class="chips" id="band-cats">
-        <span class="chip" data-full="1" title="Zoom out to this receiver's entire coverage">Full</span>
+        ${isWidebandCoverage() ? `<span class="chip" data-full="1" title="Zoom out to this receiver's entire coverage">${fmtWholeMHzRange(currentCoverage.lowHz, currentCoverage.highHz)}</span>` : ""}
         ${cats.map((c) => `<span class="chip${c === bandCategory ? " on" : ""}" data-cat="${c}">${c}</span>`).join("")}
       </div>
       <div class="chips g4" id="band-chips">${bands.map((b) => `<span class="chip" data-freq="${b.freq}">${b.label}</span>`).join("")}</div>
