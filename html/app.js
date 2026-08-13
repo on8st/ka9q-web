@@ -471,7 +471,34 @@ client.addEventListener("frontend", (e) => {
       // reported live 2026-08-13), so this retunes once to the coverage
       // midpoint itself rather than reusing goToFullBand()'s zoom-level-0
       // framing.
-      tuneTo(coverageMidpointHz());
+      //
+      // A true first-ever session never gets an explicit mode otherwise:
+      // maybeAutoSwitchMode() (called from tuneTo() below) is a no-op
+      // here, since modeForFrequency() only covers HF by design and
+      // returns null above 30MHz. Safe to set immediately, unlike the
+      // retune below - mode-setting doesn't touch the Frontend bounds
+      // race that retuning does (see next comment).
+      client.setMode("fm");
+      applyFilterDefaultsForMode("fm");
+      $("tuned-mode").textContent = "fm";
+      // The retune itself has to wait, though - confirmed live
+      // (2026-08-13, headless-Chromium against a freshly redeployed UHF
+      // instance, same technique as the NaN-window race already
+      // documented above for goToFullBand()/frontend_if_bounds()):
+      // tuneTo()'s AZC path calls client.zoomCenter() when azcEnabled is
+      // on (the default), and firing that within the same still-settling
+      // window server-side corrupts every subsequent Spectrum Data
+      // packet's centerHz field for the rest of the session (confirmed
+      // via decodeSpectrumFrame logging: centerHz jumped from the
+      // correct value to a nonsense ~4.29GHz on the very next frame and
+      // never recovered) - spectrum-canvas.js's render() then locks its
+      // spanKey to that bad value and the waterfall/trace never paints
+      // real data again, without a full reconnect. frequencyHz (the
+      // tuned/demod frequency, set directly by the F: command, not
+      // server-computed from Frontend bounds) stayed correct throughout,
+      // confirming this is the same class of race as goToFullBand's, not
+      // a new one - so it gets the exact same proven 2s wait.
+      setTimeout(() => tuneTo(coverageMidpointHz()), 2000);
     }
   }
 });
