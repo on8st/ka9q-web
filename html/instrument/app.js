@@ -150,7 +150,30 @@ const spectrumDisplay = createSpectrumDisplay($("display-area"), {
   // value through these callbacks and this is where it actually becomes
   // a wire command, same pattern as onTune above.
   onPan: (centerHz) => client.zoomCenter(centerHz),
-  onZoom: (direction) => { if (currentFreqHz !== null) client.zoomStep(direction, currentFreqHz); },
+  // Wheel zoom-out is capped at the currently tuned ham band's own real
+  // width - requested explicitly 2026-08-13 ("should never zoom larger
+  // than the selected band"). Same width formula as the band chips' own
+  // zoom-to-fit (targetSpanForChip() below: real edges * 1.15 headroom),
+  // deliberately not reused wholesale here though - that function's
+  // utility/broadcast fallback spans (20kHz/300kHz) are meant for "zoom
+  // IN to this chip," not a cap on zooming OUT, and would wrongly
+  // restrict wheel-zoom whenever the tuned frequency isn't inside a
+  // defined ham band at all (Full Band, WWV, broadcast). The cap only
+  // applies when `bandForFrequency()` finds a real match; zooming out
+  // stays unrestricted everywhere else, same as before this change.
+  onZoom: (direction) => {
+    if (currentFreqHz === null) return;
+    if (direction < 0) {
+      const band = bandForFrequency(currentFreqHz);
+      if (band) {
+        const maxSpanHz = (band.highHz - band.lowHz) * 1.15;
+        const last = spectrumDisplay.getLastSpectrum();
+        const currentSpanHz = last ? last.binWidthHz * last.binCount : 0;
+        if (currentSpanHz >= maxSpanHz) return; // already at/beyond the band's width
+      }
+    }
+    client.zoomStep(direction, currentFreqHz);
+  },
 });
 // ---- Cursor frequency readout - the cursor marker itself (spectrum-
 // canvas.js) was already ported; its numeric readout (stock's
