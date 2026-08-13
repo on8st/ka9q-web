@@ -317,7 +317,7 @@ function percentileDb(binsDb, p) {
   return sorted[idx];
 }
 
-export function createSpectrumDisplay(container, { onTune } = {}) {
+export function createSpectrumDisplay(container, { onTune, onPan, onZoom } = {}) {
   container.innerHTML = "";
   container.classList.add("spectrum-display");
   const canvas = document.createElement("canvas");
@@ -510,13 +510,59 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   let cursorFreqHz = null;
   function setCursorActive(v) { cursorActive = !!v; saveBool(CURSOR_ACTIVE_KEY, cursorActive); if (!paused) draw(); }
   function setCursorFreqHz(hz) { cursorFreqHz = hz; if (!paused) draw(); }
+
+  // Left-click-drag pans the view (onPan), a plain left-click (no real
+  // movement) tunes or sets the cursor, same as before - distinguished by
+  // a small pixel threshold so an intentional pan never gets misread as a
+  // tune-to-the-drag-start-point and vice versa. Requested explicitly
+  // 2026-08-13 - a prior version of this file's own comment here noted
+  // "this UI has no drag-to-pan yet to distinguish from" as the reason
+  // click-to-tune could stay this simple; no longer true.
+  const PAN_DRAG_THRESHOLD_PX = 4;
+  const PAN_SEND_THROTTLE_MS = 60;
+  let dragStartX = null;
+  let dragLastSentX = null;
+  let didPan = false;
+  let lastPanSendMs = 0;
+  canvas.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return; // left button only - right button opens the context menu
+    dragStartX = e.clientX;
+    dragLastSentX = e.clientX;
+    didPan = false;
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (dragStartX === null || !lastSpectrum) return;
+    if (!didPan && Math.abs(e.clientX - dragStartX) < PAN_DRAG_THRESHOLD_PX) return;
+    didPan = true;
+    const now = Date.now();
+    if (now - lastPanSendMs < PAN_SEND_THROTTLE_MS) return;
+    lastPanSendMs = now;
+    const dpr = window.devicePixelRatio || 1;
+    const dxDevicePx = (e.clientX - dragLastSentX) * dpr;
+    dragLastSentX = e.clientX;
+    const spanHz = lastSpectrum.binWidthHz * lastSpectrum.binCount;
+    const hzPerDevicePx = spanHz / canvas.width;
+    // Dragging right reveals content that was further left - the view
+    // centre moves the opposite way from the mouse, same convention as
+    // panning a map by dragging it.
+    const newCenterHz = lastSpectrum.centerHz - dxDevicePx * hzPerDevicePx;
+    if (onPan) onPan(newCenterHz);
+  });
+  window.addEventListener("mouseup", () => {
+    dragStartX = null;
+    dragLastSentX = null;
+    // didPan is read (and reset) by the "click" handler just below, which
+    // always fires right after mouseup for the same press - not reset
+    // here, or a real drag's own terminating click would be missed.
+  });
   // Click-to-tune (prerequisite for "Keep frequency centred"/AZC, which
-  // just conditionally follows this with a zoomCenter - ported from
-  // spectrum.js's mouseup handler, minus its drag-distance/duration
-  // thresholds since this UI has no drag-to-pan yet to distinguish from).
-  // Cursor-active takes priority, matching stock: a click sets the cursor
-  // marker instead of tuning when the cursor is turned on.
+  // just conditionally follows this with a zoomCenter). Cursor-active
+  // takes priority, matching stock: a click sets the cursor marker
+  // instead of tuning when the cursor is turned on. Suppressed entirely
+  // if the click is the tail end of a real pan drag (didPan) - otherwise
+  // every pan would ALSO retune to wherever the drag happened to end.
   canvas.addEventListener("click", (e) => {
+    if (didPan) { didPan = false; return; }
     if (!lastSpectrum) return;
     const rect = canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
@@ -525,6 +571,14 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     if (cursorActive) setCursorFreqHz(hz);
     else if (onTune) onTune(hz);
   });
+
+  // Mouse wheel over the canvas zooms (in on scroll-up, out on
+  // scroll-down) - a separate gesture from the per-digit wheel-to-step
+  // tuning in freq-digits.js, requested explicitly 2026-08-13.
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    if (onZoom) onZoom(e.deltaY < 0 ? 1 : -1);
+  }, { passive: false });
 
   /** Applies DC-spike interpolation (cosmetic only) then FFT averaging,
    * then, if enabled, updates the max/min-hold arrays - once per

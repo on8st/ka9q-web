@@ -94,7 +94,13 @@ const client = new Ka9qWebClient(
 // too (reported not surviving reload, live, 2026-08-11 - this toggle had
 // simply never been wired to storage at all).
 const MODE_BY_FREQ_KEY = "instrument_mode_by_freq";
-let modeByFreqEnabled = localStorage.getItem(MODE_BY_FREQ_KEY) === "1";
+// Default ON, not off - requested explicitly 2026-08-13: "the mode
+// selector should default to the mode relevant to that spectrum part."
+// An explicit "0" (the operator turned it off) is respected; anything
+// else (unset, or "1") is on. Harmless on VHF/UHF either way -
+// modeForFrequency() (mode-by-frequency.js) returns null above 30MHz by
+// construction, so this never fires there regardless of the setting.
+let modeByFreqEnabled = localStorage.getItem(MODE_BY_FREQ_KEY) !== "0";
 function setModeByFreqEnabled(v) {
   modeByFreqEnabled = !!v;
   localStorage.setItem(MODE_BY_FREQ_KEY, modeByFreqEnabled ? "1" : "0");
@@ -137,6 +143,14 @@ const spectrumDisplay = createSpectrumDisplay($("display-area"), {
     const hz = snapToStep(rawHz, stepHz);
     tuneTo(hz);
   },
+  // Left-click-drag pan and mouse-wheel zoom, requested explicitly
+  // 2026-08-13. spectrum-canvas.js has no access to `client` (kept
+  // independent of the wire protocol by design - see ws-client.js's own
+  // header comment), so it reports the gesture as a plain Hz/direction
+  // value through these callbacks and this is where it actually becomes
+  // a wire command, same pattern as onTune above.
+  onPan: (centerHz) => client.zoomCenter(centerHz),
+  onZoom: (direction) => { if (currentFreqHz !== null) client.zoomStep(direction, currentFreqHz); },
 });
 // ---- Cursor frequency readout - the cursor marker itself (spectrum-
 // canvas.js) was already ported; its numeric readout (stock's
@@ -1012,23 +1026,23 @@ function fetchWwvSolar() {
 
 $("pause-toggle").addEventListener("change", (e) => spectrumDisplay.setPaused(e.target.checked));
 
-// ---- Keyboard: Space to pause/resume the spectrum - the one shortcut
-// from stock's ~14-shortcut set (html/radio.js's spectrum.onKeypress)
-// worth carrying over on its own merits: it's the one people reach for
-// by muscle memory, and every other stock shortcut either needs
-// fullscreen (which this UI doesn't have) or just duplicates a button
-// that's already one click away. Guarded against text-input focus, same
-// as stock's own guard, so typing a space into Notes/filter-edges/etc.
-// doesn't pause the spectrum as a side effect. ----
+// ---- Keyboard: Space toggles audio start/stop, matching stock's own
+// binding exactly (html/radio.js's global keydown handler) - requested
+// explicitly 2026-08-13, replacing an earlier Tier 2 choice that bound
+// Space to spectrum pause/resume instead (stock only does that
+// specifically in fullscreen mode, which this UI doesn't have). Guarded
+// against text-input focus, same as stock's own guard, so typing a
+// space into Notes/filter-edges/etc. doesn't toggle audio as a side
+// effect. Same start/stop logic as the Audio popover's own button. ----
 document.addEventListener("keydown", (e) => {
   if (e.code !== "Space" && e.key !== " ") return;
   const t = e.target;
   const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
   if (typing) return;
   e.preventDefault();
-  const next = !spectrumDisplay.isPaused();
-  spectrumDisplay.setPaused(next);
-  $("pause-toggle").checked = next;
+  if (audioPlayer.isPlaying()) audioPlayer.stop();
+  else audioPlayer.start();
+  renderAudioState();
 });
 function exportSpectrumCsv() {
   const current = spectrumDisplay.getLastSpectrum();
