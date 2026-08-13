@@ -1,20 +1,38 @@
 // "Show ham band edge markers" - a low/high-edge table, distinct from
 // band-options.js's BAND_OPTIONS (single center frequencies for the
 // quick-select chips - no edges, missing several bands, and collapses
-// the five separate 60m channel sub-bands into one). Ported verbatim
-// from spectrum.js's getHamBands() (values there in MHz; here in Hz to
-// match this fork's convention of working in Hz throughout).
+// the five separate 60m channel sub-bands into one). Originally ported
+// verbatim from stock's spectrum.js getHamBands() - which turned out to
+// be an IARU Region 2 (Americas) band plan, wrong for this station
+// (ON8ST, Belgium, IARU Region 1). Reported live 2026-08-13 ("why
+// doesn't the 2m band zoom from 144 to 146" - Region 1's 2m is
+// 144.000-146.000 MHz, not Region 2's 144.000-148.000). This table
+// feeds bandForFrequency() directly, so the wrong edges affected more
+// than just the drawn markers: the BAND label, mode-by-frequency
+// detection, AZC-on-tune, the band chips' own zoom-to-fit width, and
+// the wheel zoom-out band cap (issue captured live: VHF's cap never
+// actually bound against the real 4MHz-wide Region-2 "2m" entry, only
+// against the receiver's own narrower real coverage, coincidentally).
+// Region 1 edges below confirmed against well-established, unambiguous
+// IARU distinctions (2200m/630m/160m and the WARC bands 30m/20m/17m/
+// 15m/12m are the same worldwide, so those needed no change). 60m and
+// 6m are NOT changed here - both vary significantly by country/WRC
+// cycle even within Region 1 (60m in particular: these five channel
+// centers match the *US* 60m channelization exactly, not Belgium's -
+// deliberately left as a known-uncertain TODO rather than guessed at,
+// pending a real source (BIPT's current allocation table) instead of
+// assumption.
 export const HAM_BAND_EDGES = [
   { lowHz: 135_700, highHz: 137_800, label: "2200m" },
   { lowHz: 472_000, highHz: 479_000, label: "630m" },
   { lowHz: 1_800_000, highHz: 2_000_000, label: "160m" },
-  { lowHz: 3_500_000, highHz: 4_000_000, label: "80m" },
-  { lowHz: 5_330_600, highHz: 5_333_400, label: "60m ch1" },
-  { lowHz: 5_346_600, highHz: 5_349_400, label: "60m ch2" },
-  { lowHz: 5_351_500, highHz: 5_366_500, label: "60m qrp" },
-  { lowHz: 5_371_600, highHz: 5_374_400, label: "60m ch4" },
-  { lowHz: 5_403_600, highHz: 5_406_400, label: "60m ch5" },
-  { lowHz: 7_000_000, highHz: 7_300_000, label: "40m" },
+  { lowHz: 3_500_000, highHz: 3_800_000, label: "80m" }, // Region 1: 3500-3800 (was 3500-4000, Region 2)
+  { lowHz: 5_330_600, highHz: 5_333_400, label: "60m ch1" }, // TODO: US channelization, not verified for Belgium
+  { lowHz: 5_346_600, highHz: 5_349_400, label: "60m ch2" }, // TODO: US channelization, not verified for Belgium
+  { lowHz: 5_351_500, highHz: 5_366_500, label: "60m qrp" }, // TODO: US channelization, not verified for Belgium
+  { lowHz: 5_371_600, highHz: 5_374_400, label: "60m ch4" }, // TODO: US channelization, not verified for Belgium
+  { lowHz: 5_403_600, highHz: 5_406_400, label: "60m ch5" }, // TODO: US channelization, not verified for Belgium
+  { lowHz: 7_000_000, highHz: 7_200_000, label: "40m" }, // Region 1: 7000-7200 (was 7000-7300, Region 2)
   { lowHz: 10_100_000, highHz: 10_150_000, label: "30m" },
   { lowHz: 14_000_000, highHz: 14_350_000, label: "20m" },
   { lowHz: 18_068_000, highHz: 18_168_000, label: "17m" },
@@ -22,10 +40,9 @@ export const HAM_BAND_EDGES = [
   { lowHz: 24_890_000, highHz: 24_990_000, label: "12m" },
   { lowHz: 26_960_000, highHz: 27_410_000, label: "11m CB" },
   { lowHz: 28_000_000, highHz: 29_700_000, label: "10m" },
-  { lowHz: 50_000_000, highHz: 54_000_000, label: "6m" },
-  { lowHz: 144_000_000, highHz: 148_000_000, label: "2m" },
-  { lowHz: 222_000_000, highHz: 225_000_000, label: "125cm" },
-  { lowHz: 420_000_000, highHz: 450_000_000, label: "70cm" },
+  { lowHz: 50_000_000, highHz: 54_000_000, label: "6m" }, // TODO: US allocation (50-54MHz), not verified for Belgium's actual current limit
+  { lowHz: 144_000_000, highHz: 146_000_000, label: "2m" }, // Region 1: 144-146 (was 144-148, Region 2) - the reported bug
+  { lowHz: 430_000_000, highHz: 440_000_000, label: "70cm" }, // Region 1: 430-440 (was 420-450, Region 2)
   { lowHz: 1_240_000_000, highHz: 1_300_000_000, label: "23cm" },
 ];
 
