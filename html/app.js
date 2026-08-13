@@ -472,27 +472,6 @@ client.addEventListener("frontend", (e) => {
       // midpoint itself rather than reusing goToFullBand()'s zoom-level-0
       // framing.
       tuneTo(coverageMidpointHz());
-      // A true first-ever session (no reattach) never gets an explicit
-      // mode: maybeAutoSwitchMode() (called from the tuneTo() above)
-      // is a no-op here, because modeForFrequency() only covers HF by
-      // design and returns null above 30MHz. Confirmed live (2026-08-13,
-      // headless-Chromium against a freshly redeployed UHF instance):
-      // with no mode ever sent, the channel produced no real spectrum
-      // output at all (empty trace, empty waterfall, mode shown as "-")
-      // until a page reload - which only "fixed" it by accident, via a
-      // reattached session's stale pre-retune BFREQ echo (still the old
-      // 10MHz default) transiently falling inside HF's mode-by-frequency
-      // table and auto-setting "am" moments before the real retune
-      // landed. Set an explicit default here instead of relying on that
-      // race - "fm" matches this station's actual 2m/70cm usage
-      // (repeaters/simplex), not an arbitrary placeholder.
-      client.setMode("fm");
-      applyFilterDefaultsForMode("fm");
-      // setMode() has no local/optimistic update (see its own doc comment)
-      // - mirror the manual mode-picker's and maybeAutoSwitchMode()'s own
-      // pattern of updating the label directly, or it would sit on "-"
-      // until some unrelated drift-adoption M_FORCE happened to arrive.
-      $("tuned-mode").textContent = "fm";
     }
   }
 });
