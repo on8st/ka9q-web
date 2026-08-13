@@ -607,7 +607,17 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
     return { minDb: smoothMinDb, maxDb: smoothMaxDb };
   }
 
+  // Every caller (the ctx-menu's direct Ceiling/Floor number inputs,
+  // baselineUp/Down, rangeIncrease/Decrease) funnels through here, so a
+  // single guard covers all of them. rangeDecrease() already refuses to
+  // shrink the span below 10dB from its own direction; this is the same
+  // 10dB floor applied here so an inverted/degenerate range (confirmed
+  // live 2026-08-13: typing a Floor value above the current Ceiling, or
+  // clicking Floor+ enough times, stuck with no visual recovery short of
+  // Autoscale - dbToColor()'s (db-minDb)/(maxDb-minDb) division goes
+  // negative/degenerate) can't be reached from any entry point at all.
   function setRangeInternal(minDb, maxDb) {
+    if (maxDb - minDb < 10) maxDb = minDb + 10;
     manualRange = { minDb, maxDb };
     wfNeedsRepaint = true;
     if (!paused) draw();
