@@ -149,7 +149,36 @@ const spectrumDisplay = createSpectrumDisplay($("display-area"), {
   // header comment), so it reports the gesture as a plain Hz/direction
   // value through these callbacks and this is where it actually becomes
   // a wire command, same pattern as onTune above.
-  onPan: (centerHz) => client.zoomCenter(centerHz),
+  // Clarified 2026-08-13: the ask isn't just "don't zoom wider than the
+  // band," it's "can't zoom OR pan outside the selected band's own real
+  // edges at all" - i.e. the visible window (center +/- half the current
+  // span) must stay within [band.lowHz, band.highHz], not just have a
+  // span narrower than the band's width. Shared here so pan and zoom
+  // agree on the same edges, computed against whichever band the TUNED
+  // frequency (not the pan-drifted view centre) falls in - panning/
+  // wheel-zoom never change currentFreqHz (only real tuning does, via
+  // tuneTo()), so this stays anchored to "the band you're actually in"
+  // for the whole drag/scroll gesture, not whatever the view has drifted
+  // to mid-pan.
+  onPan: (centerHz) => {
+    const band = bandForFrequency(currentFreqHz);
+    if (band) {
+      const last = spectrumDisplay.getLastSpectrum();
+      const spanHz = last ? last.binWidthHz * last.binCount : 0;
+      if (spanHz > 0) {
+        const bandWidthHz = band.highHz - band.lowHz;
+        if (spanHz >= bandWidthHz) {
+          // No room to pan at this zoom level at all - centering on the
+          // band's own midpoint is the closest fit, same span either way.
+          centerHz = (band.lowHz + band.highHz) / 2;
+        } else {
+          const halfSpan = spanHz / 2;
+          centerHz = Math.min(band.highHz - halfSpan, Math.max(band.lowHz + halfSpan, centerHz));
+        }
+      }
+    }
+    client.zoomCenter(centerHz);
+  },
   // Wheel zoom-out is capped at the currently tuned ham band's own real
   // width - requested explicitly 2026-08-13 ("should never zoom larger
   // than the selected band"). Same width formula as the band chips' own
