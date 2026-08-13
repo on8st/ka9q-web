@@ -1114,6 +1114,13 @@ function renderTelemetry() {
     <div><span>ADC overs</span><span>${s.adOver}</span></div>
     <div><span>Zoom level</span><span>${s.zoomLevel}</span></div>
   ` : `<div><span>Telemetry</span><span>not yet received</span></div>`)
+    // Unconditional, unlike the rows above/below it - this station also
+    // runs UberSDR and omnisdr on other domains (same host), and someone
+    // who bookmarks/screenshots this page has no other way to tell which
+    // engine they're actually looking at. Subtle by design (a drawer row,
+    // not a banner) - matches stock's own credits list's own level of
+    // attribution, not louder than it.
+    + `<div><span>UI</span><span><a href="https://github.com/on8st/ka9q-web" target="_blank" rel="noopener" style="color:inherit">ka9q-web</a> (instrument)</span></div>`
     + (buildCommit ? `<div><span>Build</span><span>${buildCommit.slice(0, 8)}</span></div>` : "")
     + (wwvSolarText ? `<div><span>WWV solar</span><span>${wwvSolarText}</span></div>` : "");
 }
