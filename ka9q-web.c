@@ -3099,27 +3099,31 @@ static int handle_bin_data(float *power, int npower, uint8_t const *cp, unsigned
     return 0;
   sp->bins_max_db = -INFINITY;
   sp->bins_min_db = +INFINITY;
-  // A real->complex FFT (Frontend.isreal, see radio.h) already yields bins
-  // in monotonic 0..Nyquist order - there is no negative-frequency half to
-  // rotate in. The DC-centering shift below is only correct for a
-  // complex->complex FFT's wrapped bin order ([0..+N/2-1,-N/2..-1]); applied
-  // to an already-monotonic real-FFT buffer it splices the Nyquist-adjacent
-  // bin directly onto DC, producing a hard seam at the display center.
-  if (Frontend.isreal) {
-    for (int i = 0; i < l_count; i++) {
-      double p = decode_float(cp, sizeof(float));
-      p = power2dB(p);
-      if (p == -INFINITY)
-        p = -150;
-      power[i] = (float)p;
-      if (p > sp->bins_max_db)
-        sp->bins_max_db = p;
-      if (p < sp->bins_min_db)
-        sp->bins_min_db = p;
-      cp += sizeof(float);
-    }
-    return 0;
-  }
+  // This function is only ever reached via the BIN_DATA case in
+  // extract_powers()'s TLV dispatch - BIN_BYTE_DATA (upstream's newer
+  // compact encoding, VHF/UHF) goes through the entirely separate
+  // handle_bin_byte_data() below and never touches this code at all.
+  // BIN_DATA itself is always raw FFT order (DC-first, wrapped as
+  // [0..+N/2-1,-N/2..-1] in frequency-bin terms) and always needs the
+  // shift below to become ascending-frequency order - independent of
+  // Frontend.isreal.
+  //
+  // Previously gated on `if (Frontend.isreal)` (skip the shift) based on
+  // a real->complex-FFT theory: that a real-sampling front end's FFT
+  // naturally yields already-monotonic 0..Nyquist bins, so shifting
+  // would wrongly splice the Nyquist-adjacent bin onto DC. Reasonable in
+  // theory, but empirically wrong for what this station's actual BIN_DATA
+  // backend (HF's radiod fork - the only one still using this legacy
+  // format; see the SPECT2_DEMOD-probe/SPECT_DEMOD-fallback logic above)
+  // puts on the wire: confirmed independently by on8st/omnisdr's own
+  // protocol decoder (src/spectrum/ka9q-protocol.js), which found BIN_DATA
+  // always needs the shift and BIN_BYTE_DATA never does, with no
+  // dependency on isreal either way. Skipping it here left HF's real
+  // DC-first array completely unrotated - not just a cosmetic seam, but
+  // a full left/right half swap (the upper half of the requested window
+  // landed in the first half of the array, the wrapped-around lower half
+  // in the second) - reported live as "HF spectrum display: left/right
+  // sides swapped" (docs/ISSUES.md issue 1).
   int i = l_count / 2; // DC
   do {
     double p = decode_float(cp, sizeof(float));
