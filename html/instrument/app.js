@@ -853,8 +853,15 @@ function buildSpectrumCtxMenu(panel, close) {
         case "autoscale": spectrumDisplay.forceAutoscale(); close(); break;
         case "pause": spectrumDisplay.setPaused(checked); break;
         case "live": spectrumDisplay.setShowLive(checked); break;
-        case "ceiling": { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(r.minDb, Number(val)); break; }
-        case "floor": { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(Number(val), r.maxDb); break; }
+        // A cleared number input reaches here as val="" (the browser itself
+        // sanitizes non-numeric text typed into a type=number field to "",
+        // it never reaches JS as the literal typed text) - and Number("")
+        // is 0, NOT NaN, so a plain Number.isFinite() check doesn't catch
+        // it. Without the explicit val!=="" check, clearing the field
+        // silently sent a 0dBm bound with no warning (confirmed live
+        // 2026-08-13).
+        case "ceiling": { const n = Number(val); if (val !== "" && Number.isFinite(n)) { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(r.minDb, n); } break; }
+        case "floor": { const n = Number(val); if (val !== "" && Number.isFinite(n)) { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(n, r.maxDb); } break; }
         case "height": spectrumDisplay.setSpectrumPercent(Number(val)); break;
         case "show-max": spectrumDisplay.setShowMaxTrace(checked); break;
         case "show-min": spectrumDisplay.setShowMinTrace(checked); break;
@@ -898,8 +905,10 @@ function buildWaterfallCtxMenu(panel, close) {
       const checked = e.target.type === "checkbox" ? e.target.checked : null;
       const val = e.target.value;
       switch (action) {
-        case "wf-ceiling": { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(r.minDb, Number(val)); break; }
-        case "wf-floor": { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(Number(val), r.maxDb); break; }
+        // Same empty-field guard as the spectrum menu's ceiling/floor -
+        // see that case block's comment.
+        case "wf-ceiling": { const n = Number(val); if (val !== "" && Number.isFinite(n)) { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(r.minDb, n); } break; }
+        case "wf-floor": { const n = Number(val); if (val !== "" && Number.isFinite(n)) { const r = spectrumDisplay.getRange(); spectrumDisplay.setRange(n, r.maxDb); } break; }
         case "bias": spectrumDisplay.setWaterfallBias(val); break;
         case "colormap": spectrumDisplay.setColorIndex(COLORMAP_NAMES.indexOf(val)); break;
         case "azc": setAzcEnabled(checked); $("azc-enable").checked = checked; break;
