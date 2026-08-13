@@ -60,7 +60,19 @@ function setModeByFreqEnabled(v) {
 function maybeAutoSwitchMode(hz) {
   if (!modeByFreqEnabled) return;
   const mode = modeForFrequency(hz);
-  if (mode && mode !== client.mode) client.setMode(mode);
+  if (mode && mode !== client.mode) {
+    client.setMode(mode);
+    // setMode() has no echo (see ws-client.js's own comment: "Mode
+    // confirmation is asymmetric with frequency confirmation") - unlike
+    // tuneTo()'s optimistic frequency update, nothing else will ever move
+    // #tuned-mode off its old value here. Confirmed live 2026-08-13: after
+    // an auto-switch the label stayed on the previous mode indefinitely,
+    // even though the server-side mode had actually changed - the same
+    // optimistic-update fix issue #16 applied to frequency, applied here
+    // to mode. Mirrors the manual Mode-picker's own click handler, which
+    // already does this.
+    $("tuned-mode").textContent = mode;
+  }
 }
 
 // ---- Spectrum/waterfall: fills #display-area, per "the receiver fills
