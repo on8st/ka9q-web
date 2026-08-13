@@ -221,9 +221,27 @@ client.addEventListener("frontend", (e) => {
   // telemetry streams in) don't keep resetting the view mid-session, and
   // restricted to wideband coverage (HF) - VHF/UHF never had this forced
   // reset before today and shouldn't gain it as a side effect.
+  //
+  // The 2s delay is a deliberate, confirmed-necessary workaround, not
+  // padding: traced live (server-side diagnostic logging, since removed)
+  // that the server's own Frontend.min_IF/max_IF - used by
+  // frontend_if_bounds() to compute where "the middle of the real
+  // coverage" actually is, for the Z:c: zoom-centre command
+  // goToFullBand() sends - read as NaN for the first several calls after
+  // a session starts, before settling to the real values shortly after.
+  // The CLIENT's own "frontend" event already has valid ifLowHz/ifHighHz
+  // by then (this handler's own currentCoverage computation is correct
+  // immediately), but firing goToFullBand() on that very first event
+  // raced the server's internal state and landed during its still-NaN
+  // window, silently falling back to a symmetric +/-samprate/2 window
+  // centred on 0Hz instead of the real coverage midpoint - reported live
+  // as "-32..+32MHz instead of 0..32MHz". A real server-side timing/
+  // visibility issue between whatever populates vs. reads Frontend -
+  // this is a pragmatic client-side wait for it to settle, not a fix to
+  // the underlying race (out of scope for a client-only change).
   if (!hasSetInitialView && currentCoverage.highHz > currentCoverage.lowHz) {
     hasSetInitialView = true;
-    if (isWidebandCoverage()) goToFullBand();
+    if (isWidebandCoverage()) setTimeout(goToFullBand, 2000);
   }
 });
 
