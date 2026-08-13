@@ -248,6 +248,7 @@ function saveNumber(key, v, storage = localStorage) {
 }
 
 const FFT_AVERAGING_KEY = "instrument_fft_averaging";
+const FFT_AVERAGING_MAX = 50; // matches both entry points' HTML max=50
 const MAX_HOLD_ENABLED_KEY = "instrument_max_hold_enabled";
 const HOLD_DECAY_KEY = "instrument_hold_decay";
 const FREEZE_MIN_MAX_KEY = "instrument_freeze_min_max";
@@ -451,7 +452,12 @@ export function createSpectrumDisplay(container, { onTune } = {}) {
   let binsAverage = null; // Float32Array, lazily (re)sized to match binCount
 
   function setFftAveraging(n) {
-    fftAveraging = Math.max(1, Number(n) || 1);
+    // The lower bound was already enforced; the HTML max=50 on both entry
+    // points' inputs was advisory only - nothing stopped a value above 50
+    // from being accepted and stored as-is (issue 24, confirmed live
+    // 2026-08-13). Both bounds enforced here now, the single place this
+    // value is ever set from either entry point.
+    fftAveraging = Math.min(FFT_AVERAGING_MAX, Math.max(1, Number(n) || 1));
     saveNumber(FFT_AVERAGING_KEY, fftAveraging);
   }
 

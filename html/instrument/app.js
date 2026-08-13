@@ -659,7 +659,13 @@ $("waterfall-bias").addEventListener("change", (e) => spectrumDisplay.setWaterfa
 // averaging/window/overlap/poll rate (real wire commands) + max/min hold
 // (client-only trace overlays). ----
 $("fft-avg").value = String(spectrumDisplay.getFftAveraging());
-$("fft-avg").addEventListener("change", (e) => spectrumDisplay.setFftAveraging(e.target.value));
+$("fft-avg").addEventListener("change", (e) => {
+  spectrumDisplay.setFftAveraging(e.target.value);
+  // setFftAveraging() clamps both bounds internally (issue 24) - echo the
+  // clamped value back so the field doesn't keep showing an out-of-range
+  // number that was silently not what actually took effect.
+  e.target.value = String(spectrumDisplay.getFftAveraging());
+});
 
 // Server-side FFT averaging and overlap are pure fire-and-forget wire
 // commands - unlike everything spectrumDisplay tracks, there's no server
@@ -700,8 +706,16 @@ $("hold-decay").addEventListener("change", (e) => spectrumDisplay.setHoldDecay(e
 $("window-type").innerHTML = WINDOW_TYPES.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
 $("window-send").addEventListener("click", () => {
   const type = $("window-type").value;
-  const param = $("window-param").value;
-  client.setWindow(type, param || 0);
+  // window-param's HTML says min=0 max=15, but nothing enforced that
+  // beyond the browser's advisory-only number-input attributes - a value
+  // outside that range was sent to the server as-is (issue 24, confirmed
+  // live 2026-08-13). Clamped here and echoed back into the field so the
+  // operator sees what was actually applied, not left believing an
+  // out-of-range value they typed took effect unmodified.
+  const paramRaw = Number($("window-param").value);
+  const param = Number.isFinite(paramRaw) ? Math.min(15, Math.max(0, paramRaw)) : 0;
+  $("window-param").value = String(param);
+  client.setWindow(type, param);
 });
 $("spectrum-overlap").value = String(lastOverlap);
 $("spectrum-overlap-send").addEventListener("click", () => {
@@ -710,7 +724,15 @@ $("spectrum-overlap-send").addEventListener("click", () => {
 });
 $("spectrum-poll-send").addEventListener("click", () => {
   const v = Number($("spectrum-poll").value);
-  if (Number.isFinite(v) && v > 0) client.setSpectrumPollRate(v);
+  if (!Number.isFinite(v) || v <= 0) return;
+  // HTML says min=30 max=2000, but that was advisory only - a value
+  // outside that range was sent to the server as-is with no client-side
+  // guard at all (issue 24, confirmed live 2026-08-13: both 10ms and
+  // 5000ms went straight out on the wire unmodified). Clamped and echoed
+  // back into the field, same as fft-avg and window-param above.
+  const clamped = Math.min(2000, Math.max(30, v));
+  $("spectrum-poll").value = String(clamped);
+  client.setSpectrumPollRate(clamped);
 });
 
 // ---- Cursor, spectrum fill style, hide DC spike ----
@@ -929,7 +951,7 @@ function buildSpectrumCtxMenu(panel, close) {
         case "freeze": spectrumDisplay.setFreezeMinMax(checked); break;
         case "max-hold": spectrumDisplay.setMaxHoldEnabled(checked); break;
         case "decay": spectrumDisplay.setHoldDecay(val); break;
-        case "fft-avg": spectrumDisplay.setFftAveraging(val); break;
+        case "fft-avg": spectrumDisplay.setFftAveraging(val); e.target.value = String(spectrumDisplay.getFftAveraging()); break;
         case "spectrum-avg": { const n = Number(val); if (Number.isFinite(n) && n > 0) { client.setSpectrumAverage(n); setLastSpectrumAvg(n); } break; }
         // val is now the full wire value directly (e.g. "KAISER_WINDOW") -
         // WINDOW_TYPES' [value,label] pairs are used as the <option>'s
