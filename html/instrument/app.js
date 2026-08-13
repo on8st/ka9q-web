@@ -491,7 +491,19 @@ function applyTunedFreq(hz) {
   digitDisplay.render(hz);
   spectrumDisplay.setTunedFreqHz(hz);
   const band = bandForFrequency(hz);
-  $("v-band").textContent = band ? band.label.toUpperCase() : "FULL BAND";
+  // HF's own Full Band CHIP already reads e.g. "0-32MHz" (fmtWholeMHzRange,
+  // requested explicitly 2026-08-13) - the BAND segment used a separate,
+  // inconsistent "FULL BAND" literal for the same not-in-any-band state,
+  // reported live as still looking wrong even after that chip fix landed.
+  // Reuse the same coverage-derived string here so both agree; narrowband
+  // receivers (VHF/UHF) have no Full Band concept at all (see the
+  // coverage-midpoint retune above) so they keep the plain literal as a
+  // safety net for the brief window before real coverage is known.
+  $("v-band").textContent = band
+    ? band.label.toUpperCase()
+    : isWidebandCoverage()
+      ? fmtWholeMHzRange(currentCoverage.lowHz, currentCoverage.highHz)
+      : "FULL BAND";
   maybeAutoSwitchMode(hz);
 }
 
