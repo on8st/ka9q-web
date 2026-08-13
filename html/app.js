@@ -112,6 +112,21 @@ function setModeByFreqEnabled(v) {
 }
 function maybeAutoSwitchMode(hz) {
   if (!modeByFreqEnabled) return;
+  // Never act on a frequency outside this receiver's own real coverage -
+  // bandForFrequency() already applies the same principle for the BAND
+  // label. Confirmed live (2026-08-13): without this guard, the server's
+  // one-time unprompted BFREQ echo of its startup default (always
+  // 10MHz, see the narrowband "retune off the 10MHz default" comment
+  // below) falls inside HF's mode-by-frequency table (10MHz = WWV10) and
+  // repeatedly fires setMode("am") on VHF/UHF - "repeatedly" because
+  // client.mode is never locally updated by our own setMode() calls (see
+  // its own "no echo" comment), so every re-announcement of that same
+  // stale value looks like a fresh mismatch. On a fresh session this
+  // stomped the explicit mode this same narrowband branch sets
+  // immediately below, right up until the real retune (delayed 2s for
+  // an unrelated race) finally landed - the receiver opened on "am"
+  // instead.
+  if (hz < currentCoverage.lowHz || hz > currentCoverage.highHz) return;
   const mode = modeForFrequency(hz);
   if (mode && mode !== client.mode) {
     client.setMode(mode);
