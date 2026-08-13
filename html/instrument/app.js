@@ -26,6 +26,26 @@ let currentCoverage = { lowHz: 0, highHz: 0 };
 
 const MODES = ["cwu", "cwl", "usb", "lsb", "am", "sam", "fm", "iq", "isb", "user1", "user2", "user3"];
 
+// Single source of truth for setWindow()'s valid values, [wireValue, label]
+// pairs. Both the drawer's #window-type select and the spectrum ctx-menu's
+// Window select are populated from this array now - previously each
+// hand-maintained its own list and the ctx-menu's had silently drifted to
+// only 6 of the 9 real options (missing Exact Blackman, Blackman-Harris,
+// HP5FT - issue 22, found 2026-08-13). A single array populating both is
+// what actually prevents that drift from recurring, not just backfilling
+// the missing 3 once.
+const WINDOW_TYPES = [
+  ["KAISER_WINDOW", "Kaiser"],
+  ["RECT_WINDOW", "Rectangular"],
+  ["BLACKMAN_WINDOW", "Blackman"],
+  ["EXACT_BLACKMAN_WINDOW", "Exact Blackman"],
+  ["GAUSSIAN_WINDOW", "Gaussian"],
+  ["HANN_WINDOW", "Hann"],
+  ["HAMMING_WINDOW", "Hamming"],
+  ["BLACKMAN_HARRIS_WINDOW", "Blackman-Harris"],
+  ["HP5FT_WINDOW", "HP5FT"],
+];
+
 function fmtMHz(hz) {
   if (hz === null || hz === undefined) return "—";
   return (hz / 1e6).toFixed(3);
@@ -677,6 +697,7 @@ $("freeze-min-max").checked = spectrumDisplay.isFreezeMinMax();
 $("freeze-min-max").addEventListener("change", (e) => spectrumDisplay.setFreezeMinMax(e.target.checked));
 $("hold-decay").value = String(spectrumDisplay.getHoldDecay());
 $("hold-decay").addEventListener("change", (e) => spectrumDisplay.setHoldDecay(e.target.value));
+$("window-type").innerHTML = WINDOW_TYPES.map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
 $("window-send").addEventListener("click", () => {
   const type = $("window-type").value;
   const param = $("window-param").value;
@@ -839,8 +860,14 @@ function ctxAct(label, action) {
 function ctxNum(label, action, value, step = "1") {
   return ctxRow(`<span class="lab">${label}</span>`, `<input class="k num" type="number" step="${step}" value="${value ?? ""}" data-action="${action}">`);
 }
+// options: either plain strings (value === display text, existing
+// callers - Decay, Palette) or [value, label] pairs (Window, where the
+// wire value "KAISER_WINDOW" and the display label "Kaiser" differ).
 function ctxSel(label, action, options, value) {
-  return ctxRow(`<span class="lab">${label}</span>`, `<select class="k" data-action="${action}">${options.map((o) => `<option${o === value ? " selected" : ""}>${o}</option>`).join("")}</select>`);
+  return ctxRow(`<span class="lab">${label}</span>`, `<select class="k" data-action="${action}">${options.map((o) => {
+    const [v, l] = Array.isArray(o) ? o : [o, o];
+    return `<option value="${v}"${v === value ? " selected" : ""}>${l}</option>`;
+  }).join("")}</select>`);
 }
 function ctxRange(label, action, min, max, step, value) {
   return ctxRow(`<span class="lab">${label}</span>`, `<input type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-action="${action}">`);
@@ -867,7 +894,7 @@ function buildSpectrumCtxMenu(panel, close) {
       <div class="grp">Averaging</div>
       ${ctxNum("FFT (client)", "fft-avg", spectrumDisplay.getFftAveraging())}
       ${ctxNum("Spectrum", "spectrum-avg", lastSpectrumAvg)}
-      ${ctxSel("Window", "window", ["KAISER", "RECT", "BLACKMAN", "GAUSSIAN", "HANN", "HAMMING"], "KAISER")}
+      ${ctxSel("Window", "window", WINDOW_TYPES, "KAISER_WINDOW")}
       ${ctxNum("Overlap", "overlap", lastOverlap, "0.01")}
       <div class="sep" style="height:1px;background:rgba(120,135,154,.18)"></div>
       ${ctxChk("Show band edges", spectrumDisplay.isShowBandEdges(), "band-edges")}
@@ -904,7 +931,11 @@ function buildSpectrumCtxMenu(panel, close) {
         case "decay": spectrumDisplay.setHoldDecay(val); break;
         case "fft-avg": spectrumDisplay.setFftAveraging(val); break;
         case "spectrum-avg": { const n = Number(val); if (Number.isFinite(n) && n > 0) { client.setSpectrumAverage(n); setLastSpectrumAvg(n); } break; }
-        case "window": client.setWindow(`${val}_WINDOW`, 0); break;
+        // val is now the full wire value directly (e.g. "KAISER_WINDOW") -
+        // WINDOW_TYPES' [value,label] pairs are used as the <option>'s
+        // value attribute, matching the drawer's own select exactly, so
+        // no more string-concatenation reconstruction needed here.
+        case "window": client.setWindow(val, 0); break;
         // Raw 0-0.99 fraction now, same as the drawer's Overlap field and
         // the same units setSpectrumOverlap() itself takes - was 0-100%
         // (val/100) here only, a same-feature/different-units mismatch

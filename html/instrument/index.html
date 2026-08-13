@@ -264,13 +264,7 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
           <option value="1.001">1.001</option><option value="1.005">1.005</option><option value="1.01">1.01</option>
           <option value="1.05">1.05</option><option value="1.1">1.1</option>
         </select></div>
-        <div class="prow"><span class="cap" style="min-width:90px">Window</span><select class="k" id="window-type">
-          <option value="KAISER_WINDOW">Kaiser</option><option value="RECT_WINDOW">Rectangular</option>
-          <option value="BLACKMAN_WINDOW">Blackman</option><option value="EXACT_BLACKMAN_WINDOW">Exact Blackman</option>
-          <option value="GAUSSIAN_WINDOW">Gaussian</option><option value="HANN_WINDOW">Hann</option>
-          <option value="HAMMING_WINDOW">Hamming</option><option value="BLACKMAN_HARRIS_WINDOW">Blackman-Harris</option>
-          <option value="HP5FT_WINDOW">HP5FT</option>
-        </select><input type="number" class="k num" id="window-param" step="0.1" min="0" max="15" title="Kaiser beta / Gaussian alpha"><button class="k mini" id="window-send">Send</button></div>
+        <div class="prow"><span class="cap" style="min-width:90px">Window</span><select class="k" id="window-type"></select><input type="number" class="k num" id="window-param" step="0.1" min="0" max="15" title="Kaiser beta / Gaussian alpha"><button class="k mini" id="window-send">Send</button></div>
         <div class="prow"><span class="cap" style="min-width:90px">FFT overlap</span><input type="number" class="k num" id="spectrum-overlap" step="0.01" min="0" max="0.99"><button class="k mini" id="spectrum-overlap-send">Send</button></div>
         <div class="prow"><span class="cap" style="min-width:90px">Poll rate (ms)</span><input type="number" class="k num" id="spectrum-poll" min="30" max="2000" step="10" value="100"><button class="k mini" id="spectrum-poll-send">Send</button></div>
       </div>
