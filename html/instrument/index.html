@@ -142,6 +142,28 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
 #ident.switchable{cursor:pointer}
 #ident.switchable:hover{background:rgba(86,199,255,.10)}
 
+/* Connection-lost banner - hidden (opacity 0 + no pointer events, not
+   display:none, so the fade transition below actually plays) until
+   .show is added; top-center so it reads as "something about the whole
+   page," not scoped to any one control. */
+#conn-banner{
+  position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:50;
+  padding:7px 14px;font-size:11px;color:var(--danger);
+  border-color:rgba(255,92,110,.35);
+  opacity:0;pointer-events:none;transition:opacity .18s ease;white-space:nowrap;
+}
+#conn-banner.show{opacity:1}
+
+/* Cursor frequency readout - bottom-left of the display area, out of the
+   way of #ident/#toolbar (both top corners) and #dockslot (below it).
+   Hidden the same opacity+pointer-events way as the banner above. */
+#cursor-readout{
+  position:absolute;left:14px;bottom:14px;z-index:31;padding:5px 10px;
+  font-family:var(--mono);font-size:11px;color:var(--live);
+  opacity:0;pointer-events:none;transition:opacity .15s ease;white-space:nowrap;
+}
+#cursor-readout.show{opacity:1}
+
 #drawer{
   position:absolute;top:0;right:0;bottom:0;width:min(370px,90%);z-index:45;
   transform:translateX(101%);transition:transform .22s ease;overflow-y:auto;padding:14px;
@@ -190,6 +212,8 @@ input.k:focus,button.k:focus-visible,.chip:focus-visible{outline:2px solid var(-
   <div id="display-area"></div>
 
   <div id="ident" class="glass"><b>ON8ST</b><span id="ident-fe"></span></div>
+  <div id="conn-banner" class="glass"></div>
+  <div id="cursor-readout" class="glass"></div>
   <div id="toolbar">
     <button class="k mini" id="rare-things" title="Telemetry, behaviour, export, notes">⋯</button>
   </div>

@@ -59,6 +59,28 @@ function fmtWholeMHzRange(lowHz, highHz) {
   return `${Math.floor(lowHz / 1e6)}-${Math.ceil(highHz / 1e6)}MHz`;
 }
 
+// Per-mode filter edge defaults, ported exactly from stock's
+// setFilterEdgesForMode() (html/radio.js) - not invented. Stock only
+// pre-fills the two input fields on a mode change, it does NOT auto-send
+// them (the operator still has to click Edge/Send) - matched exactly
+// here, same reasoning: an unreviewed automatic filter-edge change while
+// receiving would be surprising, a pre-filled suggestion is not.
+const MODE_FILTER_DEFAULTS = {
+  cwu: [-200, 200], cwl: [-200, 200],
+  usb: [50, 3000],
+  lsb: [-3000, -50],
+  am: [-5000, 5000], sam: [-5000, 5000], isb: [-5000, 5000],
+  fm: [-6000, 6000],
+  iq: [-5000, 5000],
+  // user1/2/3: no stock default either - left as-is, matching stock's own switch's default case.
+};
+function applyFilterDefaultsForMode(mode) {
+  const edges = MODE_FILTER_DEFAULTS[(mode || "").toLowerCase()];
+  if (!edges) return;
+  $("filter-low").value = String(edges[0]);
+  $("filter-high").value = String(edges[1]);
+}
+
 const client = new Ka9qWebClient(
   (location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/",
 ).connect();
@@ -82,6 +104,7 @@ function maybeAutoSwitchMode(hz) {
   const mode = modeForFrequency(hz);
   if (mode && mode !== client.mode) {
     client.setMode(mode);
+    applyFilterDefaultsForMode(mode);
     // setMode() has no echo (see ws-client.js's own comment: "Mode
     // confirmation is asymmetric with frequency confirmation") - unlike
     // tuneTo()'s optimistic frequency update, nothing else will ever move
@@ -113,9 +136,25 @@ const spectrumDisplay = createSpectrumDisplay($("display-area"), {
     // exact (sub-Hz) pixel clicked.
     const hz = snapToStep(rawHz, stepHz);
     tuneTo(hz);
-    if (azcEnabled) client.zoomCenter(hz);
   },
 });
+// ---- Cursor frequency readout - the cursor marker itself (spectrum-
+// canvas.js) was already ported; its numeric readout (stock's
+// #cursor_data) wasn't. Shown only while the cursor is actually active
+// and has a value, so it doesn't sit there empty for the (default,
+// common) case where the cursor feature isn't in use. ----
+const cursorReadout = $("cursor-readout");
+function updateCursorReadout() {
+  const active = spectrumDisplay.isCursorActive();
+  const hz = spectrumDisplay.getCursorFreqHz();
+  if (active && hz !== null) {
+    cursorReadout.textContent = `Cursor ${fmtMHz(hz)} MHz`;
+    cursorReadout.classList.add("show");
+  } else {
+    cursorReadout.classList.remove("show");
+  }
+}
+
 client.addEventListener("spectrum", (e) => {
   // centerHz is already absolute RF Hz (sp->center_frequency, server-
   // side - see ka9q-web.c's session-init comment and PROTOCOL-SPECTRUM.md).
@@ -128,12 +167,55 @@ client.addEventListener("spectrum", (e) => {
   lastInputSamprate = e.detail.inputSamprate;
   renderMeterNow(); // OVR decays moment-to-moment - refresh every frame, not just on frontend/signalMetrics updates
   driveZoomFit(e.detail);
+  updateCursorReadout();
 });
 client.addEventListener("signalMetrics", () => renderMeterNow());
 client.addEventListener("filterEdges", () => renderMeterNow());
 
-client.addEventListener("open", () => {});
-client.addEventListener("close", () => {});
+// ---- Connection status: reconnect on drop, show a brief indicator.
+// Previously both handlers here were literal no-ops - confirmed via
+// source read, not something this session assumed: if the WebSocket
+// dropped, nothing attempted to reconnect and nothing told the operator
+// the display had gone stale. Stock has a full reconnect/busy modal with
+// retry/cancel buttons (createReconnectPopup()/createBusyPopup(),
+// html/radio.js) - this is a lighter equivalent: automatic reconnect
+// with capped exponential backoff, plus a small non-blocking banner
+// rather than a modal, since the goal here is "tell the operator and
+// keep trying," not "make them click something." ----
+const connBanner = $("conn-banner");
+let reconnectAttempt = 0;
+let reconnectTimer = null;
+function showConnBanner(text) {
+  connBanner.textContent = text;
+  connBanner.classList.add("show");
+}
+function hideConnBanner() {
+  connBanner.classList.remove("show");
+}
+function scheduleReconnect() {
+  if (reconnectTimer) return; // already scheduled - don't stack retries
+  reconnectAttempt++;
+  const delayMs = Math.min(10_000, 1000 * Math.pow(1.6, reconnectAttempt - 1));
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    client.connect();
+  }, delayMs);
+}
+client.addEventListener("open", () => {
+  reconnectAttempt = 0;
+  hideConnBanner();
+});
+client.addEventListener("close", () => {
+  showConnBanner("Connection lost — reconnecting…");
+  scheduleReconnect();
+});
+client.addEventListener("busy", (e) => {
+  // BUSY: is a text reply from the server (session-capacity limit), not
+  // a socket-level failure - the socket itself may still close right
+  // after, which "close"'s own handler will schedule a retry for; this
+  // just gives a more specific message while that's pending.
+  showConnBanner(`Server busy${e.detail?.reason ? " (" + e.detail.reason + ")" : ""} — retrying…`);
+});
 
 // ---- Meter segment ----
 const meter = createMeter($("fe-power"));
@@ -315,6 +397,18 @@ function applyTunedFreq(hz) {
 function tuneTo(hz) {
   client.tune(hz);
   applyTunedFreq(hz);
+  // AZC used to live only in the canvas click-to-tune callback, so
+  // memory recall and band-chip tuning never re-centered the way stock's
+  // "every frequency change also re-centers when AZC is on" does -
+  // confirmed via source read, not directly tested until now. Moved
+  // here, the single function every tuning path (digit click/wheel,
+  // click-to-tune, memory recall, band chips) already goes through, so
+  // it now applies uniformly. Band chips and goToFullBand() already send
+  // their own explicit zoomCenter() afterward for unrelated reasons
+  // (working around setZoomLevel()'s own re-centre-to-0Hz behavior) - an
+  // extra AZC-gated call to the same value there is harmless, not a
+  // double-tune.
+  if (azcEnabled) client.zoomCenter(hz);
 }
 
 client.addEventListener("tunedFreq", (e) => applyTunedFreq(e.detail.hz));
@@ -424,6 +518,7 @@ createValuePanel($("sgm-mode"), (panel, close) => {
     const mode = e.target.dataset.mode;
     if (!mode) return;
     client.setMode(mode);
+    applyFilterDefaultsForMode(mode);
     $("tuned-mode").textContent = mode;
     close();
   });
@@ -837,15 +932,33 @@ $("show-band-edges").addEventListener("change", (e) => spectrumDisplay.setShowBa
 
 function renderTelemetry() {
   const s = spectrumDisplay.getLastSpectrum();
-  $("tele").innerHTML = s ? `
+  $("tele").innerHTML = (s ? `
     <div><span>Sample rate</span><span>${(s.inputSamprate / 1e6).toFixed(3)} Ms/s</span></div>
     <div><span>Noise BW</span><span>${s.noiseBwHz.toFixed(1)} Hz</span></div>
     <div><span>RF gain</span><span>${s.rfGainDb.toFixed(1)} dB</span></div>
     <div><span>RF atten</span><span>${s.rfAttenDb.toFixed(1)} dB</span></div>
     <div><span>ADC overs</span><span>${s.adOver}</span></div>
     <div><span>Zoom level</span><span>${s.zoomLevel}</span></div>
-  ` : `<div><span>Telemetry</span><span>not yet received</span></div>`;
+  ` : `<div><span>Telemetry</span><span>not yet received</span></div>`)
+    + (buildCommit ? `<div><span>Build</span><span>${buildCommit.slice(0, 8)}</span></div>` : "");
 }
+
+// ---- Build/version info - the drawer had no way to tell which build is
+// actually running, unlike stock's #version block (backed by real git
+// macros the Makefile already generates, GIT_VERSION etc. - see
+// Makefile). Those macros aren't exposed over the wire or any HTTP
+// endpoint (confirmed via grep - ka9q-web.c only ever printfs/syslogs
+// them), so rather than add a new server endpoint for this, the Docker
+// build writes the same commit hash it already captures for
+// /etc/ka9q-web-commit into a small static JSON file under
+// html/instrument/ too (see images/ka9q-web/Dockerfile) - the Makefile's
+// install rule (`cp -r html/.`) picks it up automatically, no server
+// change needed. Fetched once; a 404 (older image predating this) is
+// swallowed, the row just doesn't appear rather than showing an error.
+let buildCommit = null;
+fetch("build-info.json").then((r) => (r.ok ? r.json() : null)).then((d) => {
+  if (d && d.commit) { buildCommit = d.commit; renderTelemetry(); }
+}).catch(() => {});
 
 $("pause-toggle").addEventListener("change", (e) => spectrumDisplay.setPaused(e.target.checked));
 function exportSpectrumCsv() {
