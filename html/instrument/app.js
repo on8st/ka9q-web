@@ -640,9 +640,30 @@ $("waterfall-bias").addEventListener("change", (e) => spectrumDisplay.setWaterfa
 // (client-only trace overlays). ----
 $("fft-avg").value = String(spectrumDisplay.getFftAveraging());
 $("fft-avg").addEventListener("change", (e) => spectrumDisplay.setFftAveraging(e.target.value));
+
+// Server-side FFT averaging and overlap are pure fire-and-forget wire
+// commands - unlike everything spectrumDisplay tracks, there's no server
+// echo to read the real current value back from (same protocol asymmetry
+// as setMode(), see issue 20). Without tracking the last value WE sent,
+// the ctx-menu's Spectrum/Overlap rows had nothing real to show and fell
+// back to hardcoded literals (10, 50%) that never reflected actual state
+// (issue 21, found live 2026-08-13). Tracked here, not in
+// spectrum-canvas.js, since these two settings don't feed any rendering -
+// they're pure "what did I last tell the server" bookkeeping, same
+// pattern as quickBwPreset just below.
+const SPECTRUM_AVG_KEY = "instrument_spectrum_avg";
+const SPECTRUM_OVERLAP_KEY = "instrument_spectrum_overlap";
+let lastSpectrumAvg = Number(localStorage.getItem(SPECTRUM_AVG_KEY));
+if (!Number.isFinite(lastSpectrumAvg) || lastSpectrumAvg <= 0) lastSpectrumAvg = 10;
+let lastOverlap = Number(localStorage.getItem(SPECTRUM_OVERLAP_KEY));
+if (!Number.isFinite(lastOverlap) || lastOverlap < 0 || lastOverlap >= 1) lastOverlap = 0.5;
+function setLastSpectrumAvg(n) { lastSpectrumAvg = n; localStorage.setItem(SPECTRUM_AVG_KEY, String(n)); }
+function setLastOverlap(n) { lastOverlap = n; localStorage.setItem(SPECTRUM_OVERLAP_KEY, String(n)); }
+
+$("spectrum-avg").value = String(lastSpectrumAvg);
 $("spectrum-avg-send").addEventListener("click", () => {
   const v = Number($("spectrum-avg").value);
-  if (Number.isFinite(v) && v > 0) client.setSpectrumAverage(v);
+  if (Number.isFinite(v) && v > 0) { client.setSpectrumAverage(v); setLastSpectrumAvg(v); }
 });
 $("max-hold-enable").checked = spectrumDisplay.isMaxHoldEnabled();
 $("max-hold-enable").addEventListener("change", (e) => spectrumDisplay.setMaxHoldEnabled(e.target.checked));
@@ -661,9 +682,10 @@ $("window-send").addEventListener("click", () => {
   const param = $("window-param").value;
   client.setWindow(type, param || 0);
 });
+$("spectrum-overlap").value = String(lastOverlap);
 $("spectrum-overlap-send").addEventListener("click", () => {
   const v = Number($("spectrum-overlap").value);
-  if (Number.isFinite(v) && v >= 0 && v < 1) client.setSpectrumOverlap(v);
+  if (Number.isFinite(v) && v >= 0 && v < 1) { client.setSpectrumOverlap(v); setLastOverlap(v); }
 });
 $("spectrum-poll-send").addEventListener("click", () => {
   const v = Number($("spectrum-poll").value);
@@ -844,9 +866,9 @@ function buildSpectrumCtxMenu(panel, close) {
       ${ctxSel("Decay", "decay", ["1", "1.0001", "1.0005", "1.001", "1.005", "1.01", "1.05", "1.1"], String(spectrumDisplay.getHoldDecay()))}
       <div class="grp">Averaging</div>
       ${ctxNum("FFT (client)", "fft-avg", spectrumDisplay.getFftAveraging())}
-      ${ctxRow('<span class="lab">Spectrum</span>', '<input class="k num" type="number" step="1" value="10" data-action="spectrum-avg">')}
+      ${ctxNum("Spectrum", "spectrum-avg", lastSpectrumAvg)}
       ${ctxSel("Window", "window", ["KAISER", "RECT", "BLACKMAN", "GAUSSIAN", "HANN", "HAMMING"], "KAISER")}
-      ${ctxRow('<span class="lab">Overlap (%)</span>', '<input class="k num" type="number" step="1" value="50" data-action="overlap">')}
+      ${ctxNum("Overlap", "overlap", lastOverlap, "0.01")}
       <div class="sep" style="height:1px;background:rgba(120,135,154,.18)"></div>
       ${ctxChk("Show band edges", spectrumDisplay.isShowBandEdges(), "band-edges")}
       ${ctxChk("No fill", spectrumDisplay.isNoFill(), "no-fill")}
@@ -881,9 +903,13 @@ function buildSpectrumCtxMenu(panel, close) {
         case "max-hold": spectrumDisplay.setMaxHoldEnabled(checked); break;
         case "decay": spectrumDisplay.setHoldDecay(val); break;
         case "fft-avg": spectrumDisplay.setFftAveraging(val); break;
-        case "spectrum-avg": { const n = Number(val); if (Number.isFinite(n) && n > 0) client.setSpectrumAverage(n); break; }
+        case "spectrum-avg": { const n = Number(val); if (Number.isFinite(n) && n > 0) { client.setSpectrumAverage(n); setLastSpectrumAvg(n); } break; }
         case "window": client.setWindow(`${val}_WINDOW`, 0); break;
-        case "overlap": { const n = Number(val) / 100; if (Number.isFinite(n) && n >= 0 && n < 1) client.setSpectrumOverlap(n); break; }
+        // Raw 0-0.99 fraction now, same as the drawer's Overlap field and
+        // the same units setSpectrumOverlap() itself takes - was 0-100%
+        // (val/100) here only, a same-feature/different-units mismatch
+        // between the two entry points (issue 23, found live 2026-08-13).
+        case "overlap": { const n = Number(val); if (Number.isFinite(n) && n >= 0 && n < 1) { client.setSpectrumOverlap(n); setLastOverlap(n); } break; }
         case "band-edges": spectrumDisplay.setShowBandEdges(checked); break;
         case "no-fill": spectrumDisplay.setNoFill(checked); break;
         case "cursor": spectrumDisplay.setCursorActive(checked); break;
