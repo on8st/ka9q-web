@@ -2,12 +2,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { HAM_BAND_EDGES, bandEdgesInSpan } from "../../html/instrument/band-edges.js";
 
-test("HAM_BAND_EDGES has 21 bands, all with lowHz < highHz", () => {
-  // Was 22 - "125cm" (222-225MHz) removed 2026-08-13: an IARU Region 2
-  // (Americas) allocation with no equivalent in Region 1 at all (this
-  // station is ON8ST, Belgium), not just a differently-sized band like
-  // the others fixed in the same change.
-  assert.equal(HAM_BAND_EDGES.length, 21);
+test("HAM_BAND_EDGES has 18 bands, all with lowHz < highHz", () => {
+  // Was 21 - 2026-08-13: the five US-channelized "60m ch1..ch5" entries
+  // collapsed into a single Belgian "60m" segment (UBA-confirmed
+  // 5351.5-5366.5kHz, net -4), and a new "4m" entry added (UBA-confirmed
+  // 70.1125-70.4125MHz secondary, net +1) - 21 - 4 + 1 = 18. Before that,
+  // was 22 - "125cm" (222-225MHz) removed: an IARU Region 2 (Americas)
+  // allocation with no equivalent in Region 1 at all (this station is
+  // ON8ST, Belgium), not just a differently-sized band like the others.
+  assert.equal(HAM_BAND_EDGES.length, 18);
   for (const b of HAM_BAND_EDGES) assert.ok(b.lowHz < b.highHz, `${b.label} has lowHz >= highHz`);
 });
 
@@ -34,9 +37,11 @@ test("bandEdgesInSpan includes a band that only partially overlaps the span", ()
   assert.deepEqual(result.map((b) => b.label), ["20m"]);
 });
 
-test("bandEdgesInSpan returns multiple bands for a wide span (e.g. the five 60m channels)", () => {
+test("bandEdgesInSpan returns the single 60m band for a wide span", () => {
+  // Was 5 separate "60m ch1..ch5" labels (US channelization) before
+  // 2026-08-13's switch to Belgium's single UBA-confirmed segment.
   const result = bandEdgesInSpan(5_000_000, 5_500_000);
-  assert.deepEqual(result.map((b) => b.label), ["60m ch1", "60m ch2", "60m qrp", "60m ch4", "60m ch5"]);
+  assert.deepEqual(result.map((b) => b.label), ["60m"]);
 });
 
 test("bandEdgesInSpan returns [] for a span with no ham bands (e.g. broadcast FM)", () => {

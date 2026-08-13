@@ -1,17 +1,20 @@
 // Ported directly from html/radio.js's own bandOptions - not reinvented -
 // including this fork's own 2m/70cm additions (frequency-offset commit).
 // Keep in sync with that file if it ever changes.
+//
+// 60M was radio.js's own five US-channelized entries (60Mch1..60Mch5) -
+// same error as band-edges.js originally carried (see that file's header
+// comment). Collapsed 2026-08-13 to a single chip at 5359000Hz, the
+// centre of Belgium's actual UBA-confirmed 5351.5-5366.5kHz secondary
+// segment - matching band-edges.js's own consolidation in the same
+// change, so the quick-select chip and the edge markers/BAND label agree.
 export const BAND_OPTIONS = {
   amateur: [
     { label: "2200M", freq: 136750 },
     { label: "630M", freq: 475500 },
     { label: "160M", freq: 1900000 },
     { label: "80M", freq: 3715000 },
-    { label: "60Mch1", freq: 5330500 },
-    { label: "60Mch2", freq: 5346500 },
-    { label: "60M", freq: 5357000 },
-    { label: "60Mch4", freq: 5371500 },
-    { label: "60Mch5", freq: 5403500 },
+    { label: "60M", freq: 5359000 },
     { label: "40M", freq: 7150000 },
     { label: "30M", freq: 10125000 },
     { label: "20M", freq: 14185000 },

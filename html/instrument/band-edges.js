@@ -15,23 +15,35 @@
 // against the receiver's own narrower real coverage, coincidentally).
 // Region 1 edges below confirmed against well-established, unambiguous
 // IARU distinctions (2200m/630m/160m and the WARC bands 30m/20m/17m/
-// 15m/12m are the same worldwide, so those needed no change). 60m and
-// 6m are NOT changed here - both vary significantly by country/WRC
-// cycle even within Region 1 (60m in particular: these five channel
-// centers match the *US* 60m channelization exactly, not Belgium's -
-// deliberately left as a known-uncertain TODO rather than guessed at,
-// pending a real source (BIPT's current allocation table) instead of
-// assumption.
+// 15m/12m are the same worldwide, so those needed no change). 60m/6m/4m
+// are Belgium-specific national allocations (not IARU-wide), confirmed
+// 2026-08-13 against UBA's own published tables (uba.be/nl/info/
+// frequentie-vermogens and uba.be/.../bandplanning-between-50-and-54-mhz,
+// the national society's own numbers - not guessed at, and not the
+// *US* 60m channelization this table originally, wrongly, carried):
+// - 60m: Belgium's actual allocation is a single 5351.5-5366.5kHz
+//   secondary segment (Class A only, 15W ERP) - it only ever matched
+//   *one* of the five US channels ("60m qrp") by coincidence; the other
+//   four were pure US channelization with no Belgian equivalent, removed.
+// - 6m: UBA confirms Belgium is capped at 50-52MHz secondary (52-54MHz
+//   "NOT AUTORIZED IN BELGIUM" per UBA's own bandplan doc) - narrower
+//   than the US-wide 50-54MHz this entry previously carried.
+// - 4m: added new, Belgium-only (no Region 2 equivalent existed to carry
+//   over). UBA lists two disjoint segments - a 10kHz-wide single-carrier
+//   slice at 69.95MHz (10W EIRP) and the main 70.1125-70.4125MHz segment
+//   (50W) - only the main segment is represented here; the 69.95MHz
+//   sliver is a beacon/experimental channel, not a tunable band, so
+//   doesn't fit this table's low/high-edge shape.
+// 6m and 4m are both above the RX888 front end's current direct-sampling
+// HF configuration (Nyquist per config/radiod@rx888-web.conf's rx888
+// samprate) - added for completeness (BAND label, markers) even though
+// this receiver can't currently tune into either.
 export const HAM_BAND_EDGES = [
   { lowHz: 135_700, highHz: 137_800, label: "2200m" },
   { lowHz: 472_000, highHz: 479_000, label: "630m" },
   { lowHz: 1_800_000, highHz: 2_000_000, label: "160m" },
   { lowHz: 3_500_000, highHz: 3_800_000, label: "80m" }, // Region 1: 3500-3800 (was 3500-4000, Region 2)
-  { lowHz: 5_330_600, highHz: 5_333_400, label: "60m ch1" }, // TODO: US channelization, not verified for Belgium
-  { lowHz: 5_346_600, highHz: 5_349_400, label: "60m ch2" }, // TODO: US channelization, not verified for Belgium
-  { lowHz: 5_351_500, highHz: 5_366_500, label: "60m qrp" }, // TODO: US channelization, not verified for Belgium
-  { lowHz: 5_371_600, highHz: 5_374_400, label: "60m ch4" }, // TODO: US channelization, not verified for Belgium
-  { lowHz: 5_403_600, highHz: 5_406_400, label: "60m ch5" }, // TODO: US channelization, not verified for Belgium
+  { lowHz: 5_351_500, highHz: 5_366_500, label: "60m" }, // Belgium (UBA): single secondary segment, Class A only, 15W ERP
   { lowHz: 7_000_000, highHz: 7_200_000, label: "40m" }, // Region 1: 7000-7200 (was 7000-7300, Region 2)
   { lowHz: 10_100_000, highHz: 10_150_000, label: "30m" },
   { lowHz: 14_000_000, highHz: 14_350_000, label: "20m" },
@@ -40,7 +52,8 @@ export const HAM_BAND_EDGES = [
   { lowHz: 24_890_000, highHz: 24_990_000, label: "12m" },
   { lowHz: 26_960_000, highHz: 27_410_000, label: "11m CB" },
   { lowHz: 28_000_000, highHz: 29_700_000, label: "10m" },
-  { lowHz: 50_000_000, highHz: 54_000_000, label: "6m" }, // TODO: US allocation (50-54MHz), not verified for Belgium's actual current limit
+  { lowHz: 50_000_000, highHz: 52_000_000, label: "6m" }, // Belgium (UBA): capped at 50-52MHz, 52-54MHz not authorized - outside current RX888 HF coverage
+  { lowHz: 70_112_500, highHz: 70_412_500, label: "4m" }, // Belgium (UBA): main secondary segment, 50W - outside current RX888 HF coverage
   { lowHz: 144_000_000, highHz: 146_000_000, label: "2m" }, // Region 1: 144-146 (was 144-148, Region 2) - the reported bug
   { lowHz: 430_000_000, highHz: 440_000_000, label: "70cm" }, // Region 1: 430-440 (was 420-450, Region 2)
   { lowHz: 1_240_000_000, highHz: 1_300_000_000, label: "23cm" },
