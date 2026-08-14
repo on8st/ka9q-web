@@ -1021,6 +1021,23 @@ export function createSpectrumDisplay(container, { onTune, onPan, onZoom } = {})
         rawFloorEma = null;
         rawTopEma = null;
         autorangeCommitCount = 0; // every new view gets the fast warm-up treatment, not just page load
+        // Same stale-data hazard the waterfall-history reset below and
+        // this comment block above both already describe: binsMax/binsMin
+        // are plain bin-INDEX arrays with no idea what frequency any given
+        // index represents. processFrame() below (which updates them via
+        // updateHoldValue()) runs before the waterfall's own spanKey reset
+        // (later in this function), so without resetting here too, a
+        // retune/zoom/band-switch kept blending the OLD span's hold
+        // extremes into the NEW span's bins index-for-index - most visibly
+        // wrong with the stock default "Infinite" hold decay, where a
+        // stale max/min trace from a completely different frequency would
+        // never decay away at all, just sit there indefinitely mislabeled
+        // as this view's history. null here makes processFrame()'s own
+        // `!binsMax` check reseed both fresh from THIS frame's real data,
+        // exactly like setMaxHoldEnabled() already does when the feature
+        // is toggled off and back on.
+        binsMax = null;
+        binsMin = null;
       }
       updateAutorange(spectrum.binsDb);
       const rowBins = processFrame(spectrum); // once per real frame only - draw() must never re-run this (see its own call sites)
