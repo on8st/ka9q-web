@@ -84,11 +84,18 @@ directly instead:
   and **reattaches** the existing session struct if one exists for that
   client, rather than allocating a fresh one per WebSocket connection.
 - `process_status_packet()`'s unconditional `BFREQ` send is gated on
-  `*last_sent_backend_frequency` - `NaN` for a genuinely brand-new session
-  (so it fires once), otherwise only when `Channel.tune.freq` differs from
-  what *this specific session* was last told (`ka9q-web.c:~3950`). A
-  reattached session already "knows" its last-told frequency, so nothing
-  gets resent unless the real backend frequency actually changes.
+  `sp->last_sent_backend_frequency` - `NaN` for a genuinely brand-new
+  session (so it fires once), otherwise only when `Channel.tune.freq`
+  differs from what *this specific session* was last told
+  (`ka9q-web.c:~3950`). A reattached session already "knows" its
+  last-told frequency, so nothing gets resent unless the real backend
+  frequency actually changes. **This field is per-session** (a
+  `struct session` member) - it was briefly a single `ctrl_thread()`
+  static shared by every session instead, which made tuning one session
+  spuriously re-notify every *other* active session on a different
+  frequency of its own (unchanged) `BFREQ` on its next status packet;
+  fixed by moving it into `struct session`, matching what this doc
+  already (and, at the time, incorrectly) described.
 - `SHIFT`, by contrast, is sent unconditionally whenever it differs from
   `sp->shift` (also fresh-`NaN` on a new session) - confirmed via repeated
   live reconnects to always arrive, unlike `BFREQ`.

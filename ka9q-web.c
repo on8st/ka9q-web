@@ -158,6 +158,12 @@ struct session {
   double spectrum_base;
   double spectrum_step;
   double shift; /* per-session post-detection audio frequency shift, Hz */
+  double last_sent_backend_frequency; /* last Channel.tune.freq this session was sent a BFREQ for -
+                                          per-session on purpose: this used to be a single static
+                                          shared by every session in ctrl_thread(), so tuning one
+                                          session's frequency would make every OTHER active session
+                                          (on a different frequency) receive a spurious redundant
+                                          BFREQ on its next status packet. NaN until first sent. */
   unsigned long last_client_command_ms; /* monotonic ms when local web client last issued freq/mode */
   unsigned long reattach_time_ms; /* monotonic ms when a websocket was reattached to this session */
   unsigned long spectrum_restart_quiet_until_ms; /* monitor cooldown until this ms */
@@ -2060,6 +2066,7 @@ onion_connection_status home(void *data, onion_request * req,
   sp->next=NULL;
   sp->previous=NULL;
   sp->shift = NAN;
+  sp->last_sent_backend_frequency = NAN;
 
   sp->bins_min_db = -120;
   sp->bins_max_db = 0;
@@ -3461,7 +3468,7 @@ void set_realtime(void){
 /* Forward declarations for helpers used by ctrl_thread (helpers defined later) */
 static ssize_t recv_status_packet(uint8_t *buffer, size_t buflen, uint32_t *out_ssrc);
 static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_length);
-static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length, double *last_sent_backend_frequency);
+static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length);
 static bool tlv_has_type(uint8_t const *buf, int len, enum status_type want);
 
 /*
@@ -3500,7 +3507,6 @@ multiple clients, supporting features like dynamic scaling, error correction, an
 */
 void *ctrl_thread(void *arg)
 {
-  static double last_sent_backend_frequency = 0.0;
   uint8_t buffer[PKTSIZE / sizeof(float)];
 
   if (run_with_realtime)
@@ -3541,7 +3547,7 @@ void *ctrl_thread(void *arg)
         } else {
           if (debugSSRC)
             fprintf(stderr, "ctrl_thread: status packet ssrc=%u -> session ssrc=%u sp=%p\n", ssrc, sp->ssrc, (void *)sp);
-          process_status_packet(sp, buffer, (int)rx_length, &last_sent_backend_frequency);
+          process_status_packet(sp, buffer, (int)rx_length);
           pthread_mutex_unlock(&session_mutex);
         }
       } else {
@@ -3956,12 +3962,16 @@ static void process_spectrum_packet(struct session *sp, uint8_t *buffer, int rx_
     5) Build a status RTP payload (baseband power, filter edges, optional description)
       and send it to the browser via `send_ws_binary_to_session()`.
   - Notes:
-    * `last_sent_backend_frequency` is used to avoid redundant BFREQ notifications.
+    * `sp->last_sent_backend_frequency` is used to avoid redundant BFREQ
+      notifications - per-session (not a shared/static value across
+      sessions): every session in ctrl_thread()'s loop calls this function,
+      and two sessions tuned to different frequencies must each track their
+      own "last BFREQ sent" independently, or tuning one spuriously
+      re-notifies the other on its very next status packet.
     * The function relies on helper wrappers (send_ws_*) to perform websocket I/O
       with proper locking.
 */
-static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length,
-                       double *last_sent_backend_frequency)
+static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_length)
 {
   uint8_t output_buffer[PKTSIZE];
   /* Detect whether this status packet contains an explicit SHIFT_FREQUENCY TLV */
@@ -4004,7 +4014,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
               char freq_msg[64];
               snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
               send_ws_text_to_session(sp, freq_msg);
-              *last_sent_backend_frequency = Channel.tune.freq;
+              sp->last_sent_backend_frequency = Channel.tune.freq;
               sp->left_cw_pending = 0;
             }
           }
@@ -4030,7 +4040,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
             char freq_msg[64];
             snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
             send_ws_text_to_session(sp, freq_msg);
-            *last_sent_backend_frequency = Channel.tune.freq;
+            sp->last_sent_backend_frequency = Channel.tune.freq;
             sp->cw_flip_pending = 0;
             sp->freq_mismatch_count = 0;
           } else if (now - sp->cw_flip_time_ms > 5000UL) {
@@ -4111,15 +4121,15 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
      causing repeated notifications or false mismatch detection. */
   {
     const double FREQ_EPS_HZ = 0.5; /* 0.5 Hz tolerance */
-    bool backend_changed = isnan(*last_sent_backend_frequency) ||
-                           (fabs(*last_sent_backend_frequency - Channel.tune.freq) > FREQ_EPS_HZ);
+    bool backend_changed = isnan(sp->last_sent_backend_frequency) ||
+                           (fabs(sp->last_sent_backend_frequency - Channel.tune.freq) > FREQ_EPS_HZ);
       if (backend_changed) {
       /* Always notify client of backend frequency changes; server state is authoritative. */
       current_backend_frequency = Channel.tune.freq;
       char freq_msg[64];
       snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", current_backend_frequency);
       send_ws_text_to_session(sp, freq_msg);
-      *last_sent_backend_frequency = Channel.tune.freq;
+      sp->last_sent_backend_frequency = Channel.tune.freq;
     }
   }
 
@@ -4197,7 +4207,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
         char freq_msg[64];
         snprintf(freq_msg, sizeof(freq_msg), "BFREQ:%.3f", Channel.tune.freq);
         send_ws_text_to_session(sp, freq_msg);
-        *last_sent_backend_frequency = Channel.tune.freq;
+        sp->last_sent_backend_frequency = Channel.tune.freq;
         sp->freq_mismatch_count = 0;
       } else {
         const unsigned long CLIENT_CMD_WINDOW_MS = 5000UL;
@@ -4217,7 +4227,7 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
           snprintf(freq_msg, sizeof(freq_msg), "BFREQ_FORCE:%.3f", Channel.tune.freq);
           send_ws_text_to_session(sp, freq_msg);
           /* Keep last_sent_backend_frequency in sync when we actually notify */
-          *last_sent_backend_frequency = Channel.tune.freq;
+          sp->last_sent_backend_frequency = Channel.tune.freq;
           sp->freq_mismatch_count = 0;
           sp->last_client_command_ms = 0;
         } else {
