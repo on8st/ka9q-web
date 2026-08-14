@@ -1309,7 +1309,23 @@ function buildSpectrumCtxMenu(panel, close) {
         // WINDOW_TYPES' [value,label] pairs are used as the <option>'s
         // value attribute, matching the drawer's own select exactly, so
         // no more string-concatenation reconstruction needed here.
-        case "window": client.setWindow(val, 0); break;
+        //
+        // Shape param (Kaiser beta / Gaussian alpha) reused from the
+        // drawer's own #window-param field, NOT hardcoded to 0 - this
+        // ctx-menu shortcut only lets the operator pick a TYPE, but
+        // setWindow() always takes both, so sending a bare 0 here silently
+        // reset whatever shape param the operator had already configured
+        // via the drawer (e.g. a real Kaiser beta) every time they used
+        // this quicker path to just change window type. #window-param
+        // persists across panel opens (unlike this ctx-menu, rebuilt each
+        // time), so it's the one place that actually holds "current"
+        // param state - same clamp the drawer's own window-send applies.
+        case "window": {
+          const paramRaw = Number($("window-param").value);
+          const param = Number.isFinite(paramRaw) ? Math.min(15, Math.max(0, paramRaw)) : 0;
+          client.setWindow(val, param);
+          break;
+        }
         // Raw 0-0.99 fraction now, same as the drawer's Overlap field and
         // the same units setSpectrumOverlap() itself takes - was 0-100%
         // (val/100) here only, a same-feature/different-units mismatch
