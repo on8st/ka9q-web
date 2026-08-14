@@ -38,6 +38,13 @@
 // HF configuration (Nyquist per config/radiod@rx888-web.conf's rx888
 // samprate) - added for completeness (BAND label, markers) even though
 // this receiver can't currently tune into either.
+//
+// html/legacy/spectrum.js's Spectrum.prototype.getHamBands() is a literal
+// duplicate of this table (MHz instead of Hz, otherwise the same data) -
+// it was ported from the same wrong stock source and initially missed
+// when this table got fixed, so it kept shipping the Region 2 edges here
+// for another day (fixed 2026-08-14). Nothing ties the two together;
+// update both if you change a band edge here.
 export const HAM_BAND_EDGES = [
   { lowHz: 135_700, highHz: 137_800, label: "2200m" },
   { lowHz: 472_000, highHz: 479_000, label: "630m" },

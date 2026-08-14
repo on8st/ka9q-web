@@ -2760,17 +2760,27 @@ Spectrum.prototype.getExportSuffix = function() {
 
 // Return bands as { lowHz, highHz, label } for one-label-per-band rendering
 Spectrum.prototype.getHamBands = function() {
+    // Fixed 2026-08-14 to match html/band-edges.js's HAM_BAND_EDGES - this
+    // was stock's own table, an IARU Region 2 (Americas) band plan, wrong
+    // for this station (ON8ST, Belgium, IARU Region 1). The instrument UI's
+    // copy (html/band-edges.js) was corrected 2026-08-13 (reported live:
+    // "why doesn't the 2m band zoom from 144 to 146"); this legacy copy was
+    // missed at the time - same wrong edges (2m 144-148 instead of 144-146,
+    // 70cm 420-450 instead of 430-440, 40m 7.0-7.30 instead of 7.0-7.2, 80m
+    // 3.5-4.0 instead of 3.5-3.8), the US-channelized 60m (five discrete
+    // channels) instead of Belgium's single UBA-confirmed 5351.5-5366.5kHz
+    // segment, the US-only "125cm" band (no Region 1 equivalent, dropped),
+    // and was missing 4m entirely (Belgium-only, no Region 2 equivalent to
+    // have carried over in the first place). These two tables are literal
+    // duplicates with nothing tying them together - see html/band-edges.js's
+    // own header comment before editing either.
     var bands_mhz = [
 	{ low: 0.1357, high: 0.1378, label: '2200m' },
 	{ low: 0.472, high: 0.479, label: '630m' },
         { low: 1.8, high: 2.0, label: '160m' },
-        { low: 3.5, high: 4.0, label: '80m' },
-	{ low: 5.3306, high: 5.3334, label: '60m ch1' },
-	{ low: 5.3466, high: 5.3494, label: '60m ch2' },
-	{ low: 5.3515, high: 5.3665, label: '60m qrp' },
-	{ low: 5.3716, high: 5.3744, label: '60m ch4' },
-	{ low: 5.4036, high: 5.4064, label: '60m ch5' },
-        { low: 7.0, high: 7.30, label: '40m' },
+        { low: 3.5, high: 3.8, label: '80m' },
+	{ low: 5.3515, high: 5.3665, label: '60m' },
+        { low: 7.0, high: 7.2, label: '40m' },
         { low: 10.1, high: 10.15, label: '30m' },
         { low: 14.0, high: 14.35, label: '20m' },
         { low: 18.068, high: 18.168, label: '17m' },
@@ -2778,10 +2788,10 @@ Spectrum.prototype.getHamBands = function() {
         { low: 24.89, high: 24.99, label: '12m' },
 	{ low: 26.96, high: 27.41, label: '11m CB' },
         { low: 28.0, high: 29.7, label: '10m' },
-        { low: 50.0, high: 54.0, label: '6m' },
-	{ low: 144.0, high: 148.0, label: '2m' },
-	{ low: 222.0, high: 225.0, label: '125cm' },
-	{ low: 420.0, high: 450.0, label: '70cm'  },
+        { low: 50.0, high: 52.0, label: '6m' },
+        { low: 70.1125, high: 70.4125, label: '4m' },
+	{ low: 144.0, high: 146.0, label: '2m' },
+	{ low: 430.0, high: 440.0, label: '70cm'  },
 	{ low: 1240.0, high: 1300.0, label: '23cm' }
     ];
     return bands_mhz.map(function(b) { return { lowHz: b.low * 1e6, highHz: b.high * 1e6, label: b.label }; });
