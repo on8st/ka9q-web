@@ -51,6 +51,22 @@ function fmtMHz(hz) {
   return (hz / 1e6).toFixed(3);
 }
 
+// HTML-escapes untrusted text before it goes into an innerHTML template
+// literal. Needed specifically for memory labels (see the "Memory
+// segment" below): memories.js's importMemoriesJson() accepts a file the
+// operator picks off disk, unsanitized, and its `label`/`desc` field lands
+// straight in panel.innerHTML's template string on the very next render -
+// an imported memories file with a label like
+// `<img src=x onerror=alert(1)>` would execute as stored XSS (persisted
+// to localStorage, re-firing every time the memories panel opens) without
+// this. Text nodes only (`&`/`<`/`>`/`"`/`'`) - the labels here are never
+// meant to carry markup.
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[c]);
+}
+
 // Whole-MHz range label for the "zoom out to everything" chip (e.g.
 // "0-32MHz" for HF's real ~0.015-30.456 MHz coverage) - rounded rather
 // than fmtMHz()'s 3-decimal precision, matching the short, glanceable
@@ -779,7 +795,7 @@ createValuePanel($("sgm-mem"), (panel, close) => {
     <div class="pop-head"><span>Channel memories</span><span>${memories.length}</span></div>
     <div class="pop-body">
       <div class="memlist" id="mem-list">${memories.map((m, i) => `
-        <div class="mem" data-recall="${i}"><span class="n">${i + 1}</span><span><span class="f">${fmtMHz(m.freqHz)}</span> <span class="m">${m.label}</span></span><span class="m" data-delete="${i}">✕</span></div>
+        <div class="mem" data-recall="${i}"><span class="n">${i + 1}</span><span><span class="f">${fmtMHz(m.freqHz)}</span> <span class="m">${escapeHtml(m.label)}</span></span><span class="m" data-delete="${i}">✕</span></div>
       `).join("")}</div>
       <div class="prow"><button class="k mini" id="mem-save">Save current frequency</button></div>
       <div class="prow"><button class="k mini" id="mem-export">Export</button><button class="k mini" id="mem-import">Import</button><input type="file" id="mem-import-file" accept="application/json" hidden></div>
