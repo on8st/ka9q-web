@@ -68,7 +68,18 @@ export function computeSnrDb(basebandPowerDb, noiseDensityDb, bandwidthHz) {
  * one, 0.1 ten seconds later, etc.), ported exactly from smeter.js.
  * Clamped to [0,1] - stock displays it as a plain 0-100% fill, not dB. */
 export function computeOvrRatio(inputSamprate, samplesSinceOver) {
-  if (!samplesSinceOver || !inputSamprate) return 0;
+  // Falsy-zero trap: samplesSinceOver === 0 is not "missing data", it's the
+  // single most meaningful reading this function ever sees - "an overrange
+  // happened on the very last sample." `!samplesSinceOver` used to treat
+  // that exactly like "field never arrived" and return 0 (i.e. "nothing
+  // recent"), the worst possible answer at the worst possible moment: the
+  // meter read 0% right as an overrange occurred. Only inputSamprate == 0
+  // (the C side's own "not yet populated" sentinel, see
+  // check_frequency()'s Frontend.samprate == 0 guard) means "no real data
+  // yet" here; percentForMetric() above already validates both arguments
+  // are finite numbers before calling this, so samplesSinceOver == 0
+  // reaching this point is real, current data, not an unset field.
+  if (!inputSamprate) return 0;
   return Math.min(1, Math.max(0, inputSamprate / samplesSinceOver));
 }
 

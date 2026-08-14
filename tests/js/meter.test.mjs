@@ -93,8 +93,12 @@ test("computeOvrRatio pegs to 1 right after an overrange and decays toward 0", (
 });
 
 test("computeOvrRatio clamps to [0,1] and handles missing data without throwing", () => {
-  assert.equal(computeOvrRatio(2_400_000, 0), 0);
-  assert.equal(computeOvrRatio(0, 1000), 0);
+  // samplesSinceOver === 0 means "an overrange happened on the very last
+  // sample" - the most severe reading, not missing data. A falsy check
+  // used to treat 0 as unset and return 0 (the opposite of correct) right
+  // at the moment an overrange occurred; must peg to 1 instead.
+  assert.equal(computeOvrRatio(2_400_000, 0), 1);
+  assert.equal(computeOvrRatio(0, 1000), 0); // inputSamprate === 0 is the real "not ready yet" case
   assert.ok(computeOvrRatio(2_400_000, 1) <= 1); // huge ratio, clamped
 });
 
