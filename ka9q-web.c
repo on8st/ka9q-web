@@ -1213,7 +1213,15 @@ static void frontend_if_bounds(double *lo_if, double *hi_if){
 }
 
 static void check_frequency(struct session *sp) {
-    if(sp->bins == 0 || sp->bin_width == 0 || Frontend.samprate == 0)
+    // Frontend.frequency is NAN until the backend's first FIRST_LO_FREQUENCY
+    // TLV arrives (see its init near Frontend's declaration) - a backend
+    // that sends INPUT_SAMPRATE without ever sending FIRST_LO_FREQUENCY
+    // (version skew between radiod forks, same class of gap the SPECT2_DEMOD
+    // fallback elsewhere in this codebase exists for) leaves samprate != 0
+    // while frequency stays NAN indefinitely. round()ing a NAN into the
+    // int64_t lo below is undefined behaviour - same hazard already guarded
+    // against at line ~1987/~3301; this call site needs the same guard.
+    if(sp->bins == 0 || sp->bin_width == 0 || Frontend.samprate == 0 || isnan(Frontend.frequency))
       return;
 
     int64_t span = (int64_t)sp->bin_width * sp->bins;
@@ -1315,7 +1323,11 @@ static void zoom(struct session *sp, int shift) {
 /* Clamp center frequency so the visible span stays within [0, fs/2]
    but do not force the tuned frequency to be inside the visible window. */
 static void adjust_center_within_bounds(struct session *sp) {
-  if(sp->bin_width == 0 || sp->bins == 0 || Frontend.samprate == 0)
+  // Same NAN hazard as check_frequency() above (see its comment): a backend
+  // that reports INPUT_SAMPRATE but never FIRST_LO_FREQUENCY leaves
+  // Frontend.frequency permanently NAN while samprate != 0. Cast to int64_t
+  // below is undefined behaviour on NAN.
+  if(sp->bin_width == 0 || sp->bins == 0 || Frontend.samprate == 0 || isnan(Frontend.frequency))
     return;
 
   int64_t span = (int64_t)sp->bin_width * sp->bins;
