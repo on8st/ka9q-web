@@ -87,6 +87,32 @@ test("stop() sends A:STOP then re-asserts the encoding selector (order matters, 
   assert.equal(player.isPlaying(), false);
 });
 
+test("resumeAfterReconnect() re-sends the start sequence when audio was playing (WS reconnect)", async () => {
+  // Frames only ever reach the browser over the live WebSocket - a
+  // reattached backend session has no reason to push audio to a fresh
+  // socket until told again (ws-client.js's connect() already does the
+  // spectrum equivalent, S:STOP/S:, on every open). start() itself can't
+  // be reused here: its `if (playing) return` guard exists to make the
+  // user-facing toggle idempotent, and playing is already true across a
+  // reconnect (it correctly reflects the operator's intent, not the
+  // socket's).
+  const client = fakeClient();
+  const player = createAudioPlayer(client);
+  await player.start();
+  client.calls = [];
+  player.resumeAfterReconnect();
+  assert.deepEqual(client.calls, [["setAudioEncoding", true], ["startAudio"]]);
+  assert.equal(player.isPlaying(), true); // unchanged - this doesn't touch playing state
+});
+
+test("resumeAfterReconnect() is a no-op if audio wasn't playing", () => {
+  const client = fakeClient();
+  const player = createAudioPlayer(client);
+  player.resumeAfterReconnect();
+  assert.deepEqual(client.calls, []);
+  assert.equal(player.isPlaying(), false);
+});
+
 test("setPcm(false) while playing switches encoding live with one O:OPUS command - no stop/restart", async () => {
   // Ported from radio.js's onPcmCheckboxChange(): A:START/A:STOP is not
   // touched when switching encoding mid-stream, only O:PCM/O:OPUS.

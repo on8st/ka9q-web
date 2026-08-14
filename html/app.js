@@ -330,6 +330,12 @@ function scheduleReconnect() {
 client.addEventListener("open", () => {
   reconnectAttempt = 0;
   hideConnBanner();
+  // Re-arm audio on the fresh socket if it was playing through the drop -
+  // see audio.js's resumeAfterReconnect() for why this can't just be
+  // audioPlayer.start() (its idempotency guard would no-op here). Safe to
+  // call on the very first connect too (fires before any audio could be
+  // playing) since it's itself a no-op unless audio was actually playing.
+  audioPlayer.resumeAfterReconnect();
 });
 client.addEventListener("close", () => {
   showConnBanner("Connection lost — reconnecting…");

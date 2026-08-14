@@ -176,6 +176,36 @@ export function createAudioPlayer(client) {
     return recording;
   }
 
+  /** Re-arms the SERVER side of an already-playing audio stream after a
+   * WebSocket reconnect. Audio frames only ever reach the browser over
+   * the live WebSocket (there's no separate multicast join like the C
+   * server has) - when that socket drops and a fresh one connects, the
+   * reattached backend session (PROTOCOL-TEXT.md: sessions reattach by
+   * client IP, not recreate) has no reason to assume the new socket wants
+   * audio pushed to it until told again. ws-client.js's connect() already
+   * does exactly this for the spectrum stream on every open (S:STOP then
+   * S:) - audio had no equivalent, so the operator's `playing` state
+   * stayed true (UI still showed "Stop audio") while no audio actually
+   * came through post-reconnect. Deliberately NOT the same as calling
+   * start(): start()'s `if (playing) return` guard exists to make the
+   * user-facing toggle idempotent, but here playing is already true (it
+   * correctly reflects the operator's intent through the drop) and is
+   * exactly why that guard would silently no-op if reused here - this
+   * resends the wire sequence unconditionally instead, without touching
+   * playing/recording state. No-op if audio wasn't playing at all. */
+  function resumeAfterReconnect() {
+    if (!playing) return;
+    if (usePcm) {
+      client.setAudioEncoding(true);
+      ensurePcmPlayer();
+      client.startAudio();
+    } else {
+      if (!opusDecoderReady) initOpusDecoder();
+      client.setAudioEncoding(false);
+      client.startAudio();
+    }
+  }
+
   return {
     start,
     stop,
@@ -183,6 +213,7 @@ export function createAudioPlayer(client) {
     setPan,
     setPcm,
     toggleRecording,
+    resumeAfterReconnect,
     isPlaying: () => playing,
     isRecording: () => recording,
     isPcm: () => usePcm,
