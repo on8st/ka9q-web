@@ -835,14 +835,24 @@ export function createSpectrumDisplay(container, { onTune, onPan, onZoom } = {})
       // above. That tinted the waterfall's very first (newest) row a
       // visibly different shade from the rows below it every frame -
       // reported live as a "dampened"/bright top row (2026-08-11).
+      // Fill and stroke used to each run their own for(x<w) loop doing the
+      // identical binIndexForPixel()->db->t->y chain per pixel - twice the
+      // necessary per-pixel math (this loop runs every incoming spectrum
+      // frame, the hottest path here, w is canvas.width in DEVICE pixels
+      // so 2000+ on a high-DPI display) for the same result both times.
+      // Computed once into `ys`, reused for both paths below; stroke
+      // always runs (matches stock: only the fill is gated on `noFill`),
+      // so this is unconditional, not folded into the `!noFill` branch.
+      const ys = new Float32Array(w);
+      for (let x = 0; x < w; x++) {
+        const db = binsDb[binIndexForPixel(x, w, binCount)];
+        const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
+        ys[x] = wfTop - t * (wfTop - 14);
+      }
       if (!noFill) {
         ctx.beginPath();
         ctx.moveTo(0, wfTop);
-        for (let x = 0; x < w; x++) {
-          const db = binsDb[binIndexForPixel(x, w, binCount)];
-          const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
-          ctx.lineTo(x, wfTop - t * (wfTop - 14));
-        }
+        for (let x = 0; x < w; x++) ctx.lineTo(x, ys[x]);
         ctx.lineTo(w, wfTop);
         ctx.closePath();
         ctx.fillStyle = "rgba(75,224,138,0.10)";
@@ -850,10 +860,7 @@ export function createSpectrumDisplay(container, { onTune, onPan, onZoom } = {})
       }
       ctx.beginPath();
       for (let x = 0; x < w; x++) {
-        const db = binsDb[binIndexForPixel(x, w, binCount)];
-        const t = Math.min(1, Math.max(0, (db - minDb) / (maxDb - minDb)));
-        const y = wfTop - t * (wfTop - 14);
-        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        if (x === 0) ctx.moveTo(x, ys[x]); else ctx.lineTo(x, ys[x]);
       }
       ctx.strokeStyle = "#4BE08A";
       ctx.lineWidth = 1;
