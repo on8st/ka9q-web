@@ -536,6 +536,27 @@ client.addEventListener("frontend", (e) => {
       // confirming this is the same class of race as goToFullBand's, not
       // a new one - so it gets the exact same proven 2s wait.
       setTimeout(() => tuneTo(coverageMidpointHz()), 2000);
+      // Follow-up (2026-08-14): the actual corruption mechanism behind
+      // this race is now understood and fixed server-side, though the
+      // client-side wait above is left untouched - shortening/removing it
+      // needs the same live verification (real receiver, headless-Chromium
+      // CDP capture) the original 2s value got, not available in this
+      // pass. ka9q-web.c's adjust_center_within_bounds() - named directly
+      // above as the function reached via "Z:c:" - cast Frontend.frequency
+      // (NAN until the backend's first FIRST_LO_FREQUENCY TLV, same window
+      // described above) straight to int64_t with no isnan() guard: real
+      // undefined behaviour, not just a bad fallback value, and a very
+      // plausible source of the observed ~4.29GHz centerHz corruption
+      // (frontend_if_bounds()'s own min_IF/max_IF - what this comment
+      // block blamed - already had a safe isnan() fallback to a symmetric
+      // window; Frontend.frequency, used directly a few lines below that
+      // in the same function, did not). Fixed by adding the same isnan()
+      // guard check_frequency()/home()/the default-view retro-check
+      // already had (ka9q-web.c, commit 56d177b) - a call landing in the
+      // race window now safely no-ops (silently skips that one
+      // zoom-centre) instead of corrupting sp->center_frequency for the
+      // rest of the session. The 2s wait is now a safety margin against a
+      // now-closed corruption bug, not the only thing preventing it.
     }
   }
 });
