@@ -2887,6 +2887,11 @@ function applyQuickBW() {
       saveSettings();
     }
 
+    // html/mode-by-frequency.js's modeForFrequency() is a literal duplicate
+    // of this function's band table (ported verbatim, its own header
+    // comment says so) - nothing ties the two together. If this table ever
+    // needs a real-world correction, update that file too or the
+    // instrument UI and this stock UI will silently disagree.
     function setModeBasedOnFrequencyIfAllowed(f) {
         // Set mode based on frequency
         //console.log("setModeBasedOnFrequencyIfAllowed() called with freq=",f," switchModesByFrequency=",switchModesByFrequency);

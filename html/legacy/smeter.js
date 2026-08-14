@@ -32,13 +32,19 @@ const computeSUnits = createComputeSUnits();
 
 var meterType = 0;  // 0 = RSSI, 1 = SNR, updated in radio.js when the RSSI/SNR button is clicked or loaded from storage
 
-function dB2power(dB) { 
-    return Math.pow(10, dB / 10); 
+// html/meter.js's dbToLinearPower()/computeSnrDb() are a literal duplicate
+// of dB2power()/power2dB() and updateSMeter()'s inline SNR calculation
+// below (same formula, different names) - nothing ties the two together.
+// If this SNR math or its -100dB floor is ever corrected here, that file
+// needs the same fix or the two UIs will report different SNR for the
+// same signal.
+function dB2power(dB) {
+    return Math.pow(10, dB / 10);
 }
 
 function power2dB(power) {
     return 10 * Math.log10(power);
-}   
+}
 
 function createUpdateSMeter() {
     let lastMax = -200; // Static variable that holds the max value for the max hold bar graph

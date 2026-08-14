@@ -4,7 +4,15 @@
 // "Switch modes to LSB/USB by frequency < or > than 10 MHz"), an
 // HF-band auto-mode-select on programmatic tuning, not a display toggle
 // at all. Ported what it actually does. Table and thresholds copied
-// verbatim from radio.js's setModeBasedOnFrequencyIfAllowed().
+// verbatim from radio.js's setModeBasedOnFrequencyIfAllowed() - that
+// stock function is still live in html/legacy/radio.js, unmodified, and
+// this is a literal duplicate of its band table with nothing tying the
+// two together. Hasn't drifted yet (unlike html/legacy/spectrum.js's
+// getHamBands(), which did - see band-edges.js's own header comment for
+// that story), but the same risk applies: if this table ever needs a
+// real-world correction (band-plan update, a wrong threshold found live),
+// update both or the two UIs will silently disagree on what mode a given
+// HF frequency should auto-select.
 export function modeForFrequency(hz) {
   if (hz >= 30_000_000) return null; // never touches VHF/UHF
   if (hz === 2_500_000 || hz === 5_000_000 || hz === 10_000_000 || hz === 15_000_000 || hz === 20_000_000 || hz === 25_000_000) return "am"; // WWV/WWVH

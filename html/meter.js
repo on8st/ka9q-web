@@ -47,6 +47,16 @@ export function dbToNeedleDeg(db, minDeg = MIN_NEEDLE_DEG, maxDeg = MAX_NEEDLE_D
 export const SNR_MIN_DB = -10;
 export const SNR_MAX_DB = 50;
 
+// dbToLinearPower() is html/legacy/smeter.js's dB2power() (same formula,
+// different name); computeSnrDb() below is that file's inline SNR
+// calculation inside updateSMeter() (noise_power/signal_plus_noise_power/
+// SignalToNoiseRatio locals there). Two literal copies of the same math,
+// nothing tying them together - already caused one real bug once (Signal
+// was first wired to the wrong field here, ifPowerDb instead of
+// basebandPowerDb, see the header comment above) though not from this
+// specific duplication. If the SNR formula or floor value here is ever
+// corrected, smeter.js's copy needs the same fix or the two UIs will
+// report different SNR for the same signal.
 function dbToLinearPower(db) {
   return Math.pow(10, db / 10);
 }
