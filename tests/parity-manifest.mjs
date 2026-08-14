@@ -13,7 +13,14 @@
 // or null if not yet built. A string here is a claim the check verifies;
 // null is an honest, checked-in gap, not a silent omission.
 export const PARITY_MANIFEST = [
-  { feature: "Frequency tuning (type exact value)", stockIds: ["freq"], instrumentId: "freq-entry" },
+  // instrumentId was "freq-entry" (a double-click-to-type-a-value input) -
+  // built, then deliberately removed at the operator's request (commit
+  // 75e4796, "instrument: remove double-click plain-text frequency
+  // editor": "read as a jarring mode switch rather than the VFO-style
+  // interaction the rest of this widget commits to"). null here means
+  // "deliberately not present", not "not yet built" - see freq-digits.js's
+  // own header comment for the full rationale.
+  { feature: "Frequency tuning (type exact value)", stockIds: ["freq"], instrumentId: null },
   { feature: "Frequency tuning (click-to-step digits)", stockIds: ["freq"], instrumentId: "vfo-digits" },
   { feature: "Mode selection", stockIds: ["mode"], instrumentId: "tuned-mode" },
   { feature: "Tuning step size", stockIds: ["step"], instrumentId: "step-value" },
@@ -55,5 +62,10 @@ export const PARITY_MANIFEST = [
   { feature: "Spectrum/waterfall CSV export", stockIds: ["ExportData", "ExportMin", "ExportMax", "csv_out", "csvMinuteInput", "load_max"], instrumentId: "export-csv" },
   { feature: "Clear waterfall overlay / reset", stockIds: ["clear_overlay", "reset"], instrumentId: "reset-settings" },
   { feature: "Options/settings panel", stockIds: ["OptionsButton", "closeXButton"], instrumentId: "rare-things" },
-  { feature: "Alternate frequency display", stockIds: ["alternate_freq_buttons"], instrumentId: "alt-step" },
+  // instrumentId was "alt-step" (fixed-10Hz step override + round-to-
+  // nearest-kHz on typed entry) - built, then deliberately removed at the
+  // operator's request (commit f155619, "instrument: remove Alt step
+  // override, snap step up/down to the grid"). null here means
+  // "deliberately not present", not "not yet built".
+  { feature: "Alternate frequency display", stockIds: ["alternate_freq_buttons"], instrumentId: null },
 ];
