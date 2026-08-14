@@ -134,11 +134,28 @@ that was reported.
 
 Confirmed live via each front end's own `FE_ISREAL` field: HF and UHF both
 report `isreal=true` (real-sampled ADCs), VHF reports `false`
-(complex/IQ-sampled Airspy tuner). The fix branches `handle_bin_data()` on
-`Frontend.isreal` directly - real front ends get a plain in-order copy
-(same shape as `handle_bin_byte_data()`'s), complex front ends keep the
-original shift unchanged. This is why VHF never showed the bug (never took
-the wrong branch) and why UHF's identical `isreal=true` didn't visibly show
-it either - UHF's live band was too quiet/uniform during comparison
-screenshots for a one-bin seam to be visually obvious, not evidence the bug
-was absent there.
+(complex/IQ-sampled Airspy tuner).
+
+**First fix attempt (superseded - do not reimplement this):** branch
+`handle_bin_data()` on `Frontend.isreal` directly, skipping the shift for
+real front ends on the theory that a real→complex FFT's bins already
+arrive in monotonic 0..Nyquist order. Reasonable in theory, empirically
+wrong for what this station's actual `BIN_DATA` backend (HF's radiod fork
+- the only front end still using this legacy format; VHF/UHF use the
+newer `BIN_BYTE_DATA` encoding via the separate `handle_bin_byte_data()`,
+untouched by any of this) actually puts on the wire: skipping the shift
+left HF's real DC-first array completely unrotated - not a cosmetic
+one-bin seam, but a full left/right half swap (the upper half of the
+requested window landed in the first half of the array, the wrapped
+lower half in the second), reported live as "HF spectrum display:
+left/right sides swapped" (`docs/ISSUES.md` issue 1).
+
+**Shipped fix:** `handle_bin_data()` always applies the shift, independent
+of `Frontend.isreal` - `BIN_DATA` is always raw FFT order
+(`[0..+N/2-1,-N/2..-1]`) and always needs it to become ascending-frequency
+order, confirmed independently by on8st/omnisdr's own protocol decoder
+(`src/spectrum/ka9q-protocol.js`), which found `BIN_DATA` always needs the
+shift and `BIN_BYTE_DATA` never does, with no dependency on `isreal`
+either way. VHF/UHF never showed the original one-pixel-seam bug because
+they don't go through `handle_bin_data()` at all (see above), not because
+of anything `isreal`-related.
