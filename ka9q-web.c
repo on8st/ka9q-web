@@ -4141,17 +4141,33 @@ static void process_status_packet(struct session *sp, uint8_t *buffer, int rx_le
          Adopting it (the pre-existing "no recent client command" branch
          below) was pushing BFREQ_FORCE:0.000 to the browser every time
          the reaper fired. Never adopt this specific case, regardless of
-         the client-recent window - just reassert our own frequency. */
+         the client-recent window - just reassert our own frequency.
+
+         Throttled the same way the mismatch-resend branch below already
+         is (MAX_FREQ_MISMATCH consecutive polls before resending) - this
+         used to call control_set_frequency() unconditionally on every
+         single poll while the backend read ~0 Hz, which is every ~100ms
+         (spectrum_poll_us default) for the ~60s between reaper sweeps:
+         hundreds of redundant RADIO_FREQUENCY sets per reap, all taking
+         the single global ctl_mutex that every session's poll shares. */
+      sp->freq_mismatch_count++;
       if (verbose && debug_send) {
         unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
         fprintf(stderr, "%s: +%lums: SSRC %u: backend reports 0 Hz (disabled/reaped) while session wants "
-                "%.3f kHz - reasserting, never adopting 0\n",
-                __FUNCTION__, elapsed_ms, sp->ssrc, session_freq * 0.001);
+                "%.3f kHz - never adopting 0 (mismatch %d/%d)\n",
+                __FUNCTION__, elapsed_ms, sp->ssrc, session_freq * 0.001, sp->freq_mismatch_count, MAX_FREQ_MISMATCH);
       }
-      char freq_msg[64];
-      snprintf(freq_msg, sizeof(freq_msg), "%.3f", session_freq * 0.001);
-      control_set_frequency(sp, freq_msg);
-      sp->freq_mismatch_count = 0;
+      if (sp->freq_mismatch_count >= MAX_FREQ_MISMATCH) {
+        if (verbose && debug_send) {
+          unsigned long elapsed_ms = poll_start_ms ? (now_ms() - poll_start_ms) : 0UL;
+          fprintf(stderr, "%s: +%lums: SSRC %u: reasserting %.3f kHz after %d polls of backend 0 Hz\n",
+                  __FUNCTION__, elapsed_ms, sp->ssrc, session_freq * 0.001, MAX_FREQ_MISMATCH);
+        }
+        char freq_msg[64];
+        snprintf(freq_msg, sizeof(freq_msg), "%.3f", session_freq * 0.001);
+        control_set_frequency(sp, freq_msg);
+        sp->freq_mismatch_count = 0;
+      }
     } else if (diff <= FREQ_EPS_HZ) {
       /* Considered matched */
       if (sp->freq_mismatch_count != 0) {
