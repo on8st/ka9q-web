@@ -981,7 +981,14 @@ export function createSpectrumDisplay(container, { onTune, onPan, onZoom } = {})
       for (const band of bandEdgesInSpan(startHz, endHz)) {
         const xLow = pixelForHz(Math.max(band.lowHz, startHz), w, centerHz, binWidthHz, binCount);
         const xHigh = pixelForHz(Math.min(band.highHz, endHz), w, centerHz, binWidthHz, binCount);
-        if (xLow !== null) {
+        // band.lowHz >= startHz mirrors the band.highHz <= endHz check
+        // below on purpose - without it, zooming into the interior of a
+        // band (its real low edge off-screen to the left) clamps xLow to
+        // startHz via the Math.max() above, which pixelForHz() then maps
+        // to x=0: a real-looking green edge line at the screen's left
+        // border with no actual band boundary there at all. Only draw it
+        // when the band's true low edge is actually the one on screen.
+        if (xLow !== null && band.lowHz >= startHz) {
           ctx.beginPath();
           ctx.moveTo(xLow, 0);
           ctx.lineTo(xLow, h);
