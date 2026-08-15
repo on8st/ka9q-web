@@ -4909,6 +4909,14 @@ window.zoomTable = [
  // { bin_width: 50000, bin_count: 1620 },
   { bin_width: 40000, bin_count: 1620 },
   { bin_width: 20000, bin_count: 1620 },
+  // Must match the server's zoom_table[] in ka9q-web.c exactly (same index
+  // order) - 18790 Hz gives 30,439,800 Hz, the closest achievable step to
+  // HF's (RX888, direct sampling) real coverage without exceeding it.
+  // Added server-side in 2fbbbe2 but missed here at the time, which left
+  // every index from this one on pointing at a different bin_width on each
+  // side: "Z:<n>" sends a bare index into the table, so the two lists have
+  // to be kept in lockstep.
+  { bin_width: 18790, bin_count: 1620 },
   { bin_width: 10000, bin_count: 1620 },
   { bin_width: 8000, bin_count: 1620 },
   // Must match the server's zoom_table[] in ka9q-web.c exactly (same index
