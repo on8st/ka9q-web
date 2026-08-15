@@ -135,14 +135,7 @@ unconfirmed rather than leaving it stated as fact.
 
 ## Explicitly not yet done in this pass
 
-- Mode-setting's raw outbound command format - not located as a `ws.send()`
-  call site, and not guessed at. `setMode()` in `radio.js` needs a closer
-  read before any instrument-UI mode-setting code is written.
 - Zoom/spectrum-display commands (`Z:*` beyond `Z:SIZE`), memory slots, and
   the rest of the broader control surface - deliberately out of scope for
   this pass, which targeted only what a minimal live-status + basic-tuning
   UI needs.
-- The mode-setting raw command format (see table above).
-- Zoom/spectrum-display commands, memory slots, and the rest of the
-  broader control surface - deliberately out of scope for this pass, which
-  targeted only what a minimal live-status + basic-tuning UI needs.

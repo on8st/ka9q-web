@@ -132,9 +132,9 @@ already-monotonic data doesn't centre anything; it splices the
 Nyquist-adjacent bin directly onto the DC bin, which is exactly the seam
 that was reported.
 
-Confirmed live via each front end's own `FE_ISREAL` field: HF and UHF both
-report `isreal=true` (real-sampled ADCs), VHF reports `false`
-(complex/IQ-sampled Airspy tuner).
+Confirmed live via each front end's own `FE_ISREAL` field: HF (RX888) and UHF
+(Airspy R2) both report `isreal=true` (real-sampled ADCs), VHF (RTL-SDR)
+reports `false` (complex/IQ-sampled tuner).
 
 **First fix attempt (superseded - do not reimplement this):** branch
 `handle_bin_data()` on `Frontend.isreal` directly, skipping the shift for
