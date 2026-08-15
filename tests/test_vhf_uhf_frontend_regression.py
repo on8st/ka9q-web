@@ -121,11 +121,12 @@ class HfUnaffectedByTheFix(unittest.TestCase):
 
 class BandSelectorHas2mAnd70cm(unittest.TestCase):
     """Static check (no live capture needed): the quick-select band list in
-    radio.js must still carry the 2m/70cm entries this commit added on top
-    of the stock HF/6m-and-below list."""
+    the stock UI's radio.js must still carry the 2m/70cm entries this commit
+    added on top of the stock HF/6m-and-below list. Path is html/legacy/
+    since e52120c moved the stock UI there."""
 
     def test_band_options_include_2m_and_70cm(self):
-        radio_js = (Path(__file__).parent.parent / "html" / "radio.js").read_text()
+        radio_js = (Path(__file__).parent.parent / "html" / "legacy" / "radio.js").read_text()
         self.assertIn('{ label: "2M", freq: 145500000 }', radio_js)
         self.assertIn('{ label: "70CM", freq: 433500000 }', radio_js)
 
